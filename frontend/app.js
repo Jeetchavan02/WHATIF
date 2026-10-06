@@ -67,6 +67,55 @@ async function showResults(repoId) {
     const depsRes = await fetch(`${API_BASE}/repositories/${repoId}/dependencies`);
     const deps = await depsRes.json();
     document.getElementById("depCount").innerText = deps.length;
+    
+    // Fetch Git History Stats
+    try {
+        const statsRes = await fetch(`${API_BASE}/repositories/${repoId}/history/stats`);
+        const stats = await statsRes.json();
+        document.getElementById("totalCommits").innerText = stats.total_commits || 0;
+        document.getElementById("totalAdditions").innerText = stats.total_additions || 0;
+        document.getElementById("totalDeletions").innerText = stats.total_deletions || 0;
+    } catch (e) {
+        console.error("Failed to fetch history stats", e);
+    }
+
+    // Fetch Latest Commits
+    try {
+        const commitsRes = await fetch(`${API_BASE}/repositories/${repoId}/commits?page=1&page_size=20`);
+        const commits = await commitsRes.json();
+        
+        const commitsList = document.getElementById("commitsList");
+        commitsList.innerHTML = "";
+        
+        for (const commit of commits) {
+            const li = document.createElement("li");
+            li.innerHTML = `
+                <strong>${commit.commit_hash.substring(0, 7)}</strong> - 
+                ${commit.author_name} - 
+                ${new Date(commit.committed_at).toLocaleString()} - 
+                ${commit.message.split('\\n')[0]} 
+                <button onclick="viewCommit(${commit.id})">[View]</button>
+            `;
+            commitsList.appendChild(li);
+        }
+    } catch (e) {
+        console.error("Failed to fetch commits", e);
+    }
+}
+
+async function viewCommit(commitId) {
+    const res = await fetch(`${API_BASE}/commits/${commitId}`);
+    const commit = await res.json();
+    
+    const viewContent = {
+        hash: commit.commit_hash,
+        author: commit.author_name,
+        date: commit.committed_at,
+        message: commit.message,
+        changes: commit.file_changes
+    };
+    
+    document.getElementById("detailsView").innerText = JSON.stringify(viewContent, null, 2);
 }
 
 async function fetchFiles() {

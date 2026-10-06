@@ -74,3 +74,28 @@ pytest backend/tests/
 
 ## Suggested Next Milestone
 Enhance parsing for javascript/typescript to properly build the dependency graph using an AST parser (like esprima or babel).
+
+## Milestone 2: Git History & Change Tracking
+WHATIF now extracts and stores the historical evolution of a repository. This Git history is currently being collected as evidence for future impact analysis. It tracks commits, file changes (additions, modifications, deletions, renames), and their respective diffs.
+
+### Database Additions
+- **Commit**: Stores commit metadata (hash, author, date, message, parent).
+- **CommitFileChange**: Stores individual file modifications for each commit (change type, additions, deletions, old/new paths).
+
+### New API Endpoints
+- `GET /api/repositories/{id}/commits` - Paginated commit history with date and author filtering.
+- `GET /api/commits/{commit_id}` - Detailed metadata and file changes for a specific commit.
+- `GET /api/repositories/{id}/commits/{hash}` - Retrieve a commit by its hash.
+- `GET /api/repositories/{id}/history/stats` - Aggregated stats (total commits, additions, deletions, etc.).
+
+### Testing
+We use a dedicated temporary Git repository fixture using `pytest` to simulate a real git environment.
+To run the git history tests:
+```bash
+export PYTHONPATH=$PWD
+pytest backend/tests/test_git_history.py
+```
+
+### Known Limitations
+- Git history collection can be slow for extremely large repositories since it parses every patch to count line-level additions and deletions.
+- Idempotency logic only checks if a commit hash exists; it does not currently resume an interrupted analysis midway cleanly without rescanning if the previous scan crashed mid-commit.

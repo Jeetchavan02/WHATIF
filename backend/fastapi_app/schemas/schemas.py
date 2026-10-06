@@ -58,3 +58,41 @@ class SymbolResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class CommitFileChangeResponse(BaseModel):
+    id: int
+    commit_id: int
+    file_path: str
+    change_type: str
+    additions: int
+    deletions: int
+    old_path: Optional[str] = None
+    new_path: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class CommitResponse(BaseModel):
+    id: int
+    repository_id: int
+    commit_hash: str
+    author_name: str
+    author_email: str
+    message: str
+    committed_at: datetime
+    parent_hash: Optional[str] = None
+    created_at: datetime
+    file_changes: Optional[List[CommitFileChangeResponse]] = []
+
+    class Config:
+        from_attributes = True
+
+class HistoryStatsResponse(BaseModel):
+    total_commits: int
+    total_additions: int
+    total_deletions: int
+    total_modified_files: int
+    total_added_files: int
+    total_deleted_files: int
+    total_renamed_files: int
+    most_frequently_changed_files: List[dict]

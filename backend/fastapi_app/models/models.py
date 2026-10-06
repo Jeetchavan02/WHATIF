@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, BigInteger
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, BigInteger, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .base import Base
@@ -13,6 +13,7 @@ class Repository(Base):
     analysis_runs = relationship("AnalysisRun", back_populates="repository")
     files = relationship("File", back_populates="repository")
     dependencies = relationship("Dependency", back_populates="repository")
+    commits = relationship("Commit", back_populates="repository")
 
 class AnalysisRun(Base):
     __tablename__ = "analysis_runs"
@@ -60,3 +61,33 @@ class Dependency(Base):
     repository = relationship("Repository", back_populates="dependencies")
     source_file = relationship("File", foreign_keys=[source_file_id])
     target_file = relationship("File", foreign_keys=[target_file_id])
+
+class Commit(Base):
+    __tablename__ = "commits"
+    __table_args__ = (UniqueConstraint('repository_id', 'commit_hash', name='uq_repo_commit_hash'),)
+    id = Column(Integer, primary_key=True, index=True)
+    repository_id = Column(Integer, ForeignKey("repositories.id"))
+    commit_hash = Column(String, index=True)
+    author_name = Column(String)
+    author_email = Column(String)
+    message = Column(Text)
+    committed_at = Column(DateTime)
+    parent_hash = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    repository = relationship("Repository", back_populates="commits")
+    file_changes = relationship("CommitFileChange", back_populates="commit")
+
+class CommitFileChange(Base):
+    __tablename__ = "commit_file_changes"
+    id = Column(Integer, primary_key=True, index=True)
+    commit_id = Column(Integer, ForeignKey("commits.id"))
+    file_path = Column(String, index=True)
+    change_type = Column(String) # added, modified, deleted, renamed
+    additions = Column(Integer, default=0)
+    deletions = Column(Integer, default=0)
+    old_path = Column(String, nullable=True)
+    new_path = Column(String, nullable=True)
+
+    commit = relationship("Commit", back_populates="file_changes")
+

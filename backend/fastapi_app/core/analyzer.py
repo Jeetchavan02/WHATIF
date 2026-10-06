@@ -147,6 +147,10 @@ def run_analysis(repo_id: int, db: Session):
                 elif lang == "javascript":
                     analyze_js_file(file_path, f_model, db, repo_id)
         
+        # Extract git history
+        from backend.fastapi_app.services.git_history_service import extract_git_history
+        extract_git_history(local_path, repo_id, db)
+        
         if temp_dir:
             import shutil
             shutil.rmtree(temp_dir, ignore_errors=True)

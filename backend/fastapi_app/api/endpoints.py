@@ -59,3 +59,83 @@ def get_analysis_status(analysis_id: int, db: Session = Depends(get_db)):
     if not run:
         raise HTTPException(status_code=404, detail="Analysis run not found")
     return run
+
+from sqlalchemy import func, case
+from typing import Optional
+from datetime import datetime
+
+@router.get("/repositories/{repository_id}/commits", response_model=List[schemas.CommitResponse])
+def get_repository_commits(
+    repository_id: int, 
+    page: int = 1, 
+    page_size: int = 20, 
+    author: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    db: Session = Depends(get_db)
+):
+    query = db.query(models.Commit).filter(models.Commit.repository_id == repository_id)
+    if author:
+        query = query.filter(models.Commit.author_name.ilike(f"%{author}%"))
+    if date_from:
+        query = query.filter(models.Commit.committed_at >= date_from)
+    if date_to:
+        query = query.filter(models.Commit.committed_at <= date_to)
+    
+    # Order by committed_at descending
+    query = query.order_by(models.Commit.committed_at.desc())
+    
+    offset = (page - 1) * page_size
+    return query.offset(offset).limit(page_size).all()
+
+@router.get("/commits/{commit_id}", response_model=schemas.CommitResponse)
+def get_commit_by_id(commit_id: int, db: Session = Depends(get_db)):
+    commit = db.query(models.Commit).filter(models.Commit.id == commit_id).first()
+    if not commit:
+        raise HTTPException(status_code=404, detail="Commit not found")
+    return commit
+
+@router.get("/repositories/{repository_id}/commits/{commit_hash}", response_model=schemas.CommitResponse)
+def get_commit_by_hash(repository_id: int, commit_hash: str, db: Session = Depends(get_db)):
+    commit = db.query(models.Commit).filter(
+        models.Commit.repository_id == repository_id, 
+        models.Commit.commit_hash == commit_hash
+    ).first()
+    if not commit:
+        raise HTTPException(status_code=404, detail="Commit not found")
+    return commit
+
+@router.get("/repositories/{repository_id}/history/stats", response_model=schemas.HistoryStatsResponse)
+def get_history_stats(repository_id: int, db: Session = Depends(get_db)):
+    total_commits = db.query(models.Commit).filter(models.Commit.repository_id == repository_id).count()
+    
+    stats = db.query(
+        func.sum(models.CommitFileChange.additions).label('total_additions'),
+        func.sum(models.CommitFileChange.deletions).label('total_deletions'),
+        func.sum(case((models.CommitFileChange.change_type == 'modified', 1), else_=0)).label('total_modified'),
+        func.sum(case((models.CommitFileChange.change_type == 'added', 1), else_=0)).label('total_added'),
+        func.sum(case((models.CommitFileChange.change_type == 'deleted', 1), else_=0)).label('total_deleted'),
+        func.sum(case((models.CommitFileChange.change_type == 'renamed', 1), else_=0)).label('total_renamed')
+    ).join(models.Commit).filter(models.Commit.repository_id == repository_id).first()
+
+    # Most frequently changed files
+    freq_files = db.query(
+        models.CommitFileChange.file_path, 
+        func.count(models.CommitFileChange.id).label('change_count')
+    ).join(models.Commit).filter(models.Commit.repository_id == repository_id)\
+    .group_by(models.CommitFileChange.file_path)\
+    .order_by(func.count(models.CommitFileChange.id).desc())\
+    .limit(10).all()
+
+    freq_files_list = [{"file_path": f.file_path, "change_count": f.change_count} for f in freq_files]
+
+    return {
+        "total_commits": total_commits,
+        "total_additions": stats.total_additions or 0,
+        "total_deletions": stats.total_deletions or 0,
+        "total_modified_files": stats.total_modified or 0,
+        "total_added_files": stats.total_added or 0,
+        "total_deleted_files": stats.total_deleted or 0,
+        "total_renamed_files": stats.total_renamed or 0,
+        "most_frequently_changed_files": freq_files_list
+    }
