@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WHATIF - Testing UI</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <h1>WHATIF</h1>
+    <p>Software Change Impact Analyzer - Basic Testing UI</p>
+
+    <div class="control-panel">
+        <input type="text" id="repoPath" placeholder="Enter Git repository URL or path" style="width: 300px;">
+        <button onclick="analyzeRepo()">Analyze</button>
+    </div>
+
+    <div id="status"></div>
+    <div id="results" style="display:none;">
+        <h2>Repository Information</h2>
+        <pre id="repoInfo"></pre>
+
+        <h3>Stats</h3>
+        <ul>
+            <li>Files: <span id="fileCount">0</span></li>
+            <li>Dependencies: <span id="depCount">0</span></li>
+        </ul>
+
+        <button onclick="fetchFiles()">Inspect Files</button>
+        <button onclick="fetchDependencies()">Inspect Dependencies</button>
+        
+        <pre id="detailsView"></pre>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
