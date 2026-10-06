@@ -10,7 +10,10 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent.parent.parent.parent / '.env')
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -73,14 +76,26 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
+# Parse DATABASE_URL from environment
+_db_url = os.getenv('DATABASE_URL', 'postgresql://whatif_user:whatif_pass@localhost:5433/whatif_db')
+# Parse postgresql://user:pass@host:port/dbname
+_db_url_stripped = _db_url.replace('postgresql://', '').replace('postgresql+psycopg://', '')
+_db_creds, _db_hostpath = _db_url_stripped.split('@')
+_db_user, _db_pass = _db_creds.split(':', 1)
+_db_host_port, _db_name = _db_hostpath.split('/', 1)
+if ':' in _db_host_port:
+    _db_host, _db_port = _db_host_port.split(':', 1)
+else:
+    _db_host, _db_port = _db_host_port, '5433'
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'whatif_db',
-        'USER': 'whatif_user',
-        'PASSWORD': 'whatif_pass',
-        'HOST': 'localhost',
-        'PORT': '5432',
+        'NAME': _db_name,
+        'USER': _db_user,
+        'PASSWORD': _db_pass,
+        'HOST': _db_host,
+        'PORT': _db_port,
     }
 }
 

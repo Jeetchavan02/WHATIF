@@ -11,6 +11,10 @@ router = APIRouter()
 
 @router.post("/repositories", response_model=schemas.RepositoryResponse)
 def create_repository(repo: schemas.RepositoryCreate, db: Session = Depends(get_db)):
+    existing_repo = db.query(models.Repository).filter(models.Repository.url == repo.url).first()
+    if existing_repo:
+        return existing_repo
+    
     db_repo = models.Repository(url=repo.url, name=repo.name)
     db.add(db_repo)
     db.commit()

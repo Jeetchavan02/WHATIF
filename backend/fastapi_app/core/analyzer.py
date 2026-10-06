@@ -96,20 +96,35 @@ def run_analysis(repo_id: int, db: Session):
     repo = db.query(models.Repository).filter(models.Repository.id == repo_id).first()
     
     try:
-        if not os.path.exists(repo.url) or not os.path.isdir(repo.url):
-            raise ValueError(f"Path does not exist or is not a directory: {repo.url}")
+        local_path = repo.url
+        is_remote = repo.url.startswith("http://") or repo.url.startswith("https://")
+        temp_dir = None
         
-        try:
-            git_repo = Repo(repo.url)
-        except InvalidGitRepositoryError:
-            raise ValueError(f"Not a valid git repository: {repo.url}")
+        if is_remote:
+            import tempfile
+            import shutil
+            temp_dir = tempfile.mkdtemp()
+            local_path = temp_dir
+            try:
+                git_repo = Repo.clone_from(repo.url, local_path)
+            except Exception as e:
+                shutil.rmtree(temp_dir)
+                raise ValueError(f"Failed to clone repository: {e}")
+        else:
+            if not os.path.exists(local_path) or not os.path.isdir(local_path):
+                raise ValueError(f"Path does not exist or is not a directory: {local_path}")
+            
+            try:
+                git_repo = Repo(local_path)
+            except InvalidGitRepositoryError:
+                raise ValueError(f"Not a valid git repository: {local_path}")
         
-        for root, dirs, files in os.walk(repo.url):
+        for root, dirs, files in os.walk(local_path):
             dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
             
             for file_name in files:
                 file_path = os.path.join(root, file_name)
-                rel_path = os.path.relpath(file_path, repo.url)
+                rel_path = os.path.relpath(file_path, local_path)
                 
                 lang = get_language(file_path)
                 
@@ -131,6 +146,10 @@ def run_analysis(repo_id: int, db: Session):
                     analyze_python_file(file_path, f_model, db, repo_id)
                 elif lang == "javascript":
                     analyze_js_file(file_path, f_model, db, repo_id)
+        
+        if temp_dir:
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
         
         run.status = "completed"
         run.completed_at = datetime.utcnow()

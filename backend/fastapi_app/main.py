@@ -5,7 +5,7 @@ from backend.fastapi_app.models import models
 from backend.fastapi_app.core.database import engine
 
 # Normally we'd use Alembic, but for quick testing we can create all tables here if they don't exist
-# models.Base.metadata.create_all(bind=engine)
+models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="WHATIF - Software Change Impact Analyzer")
 
