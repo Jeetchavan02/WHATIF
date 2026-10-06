@@ -13,75 +13,48 @@ def get_language(path: str) -> str:
     ext = os.path.splitext(path)[1].lower()
     if ext == ".py":
         return "python"
-    elif ext in {".js", ".jsx", ".ts", ".tsx"}:
+    elif ext == ".js":
         return "javascript"
+    elif ext == ".jsx":
+        return "jsx" # Let's handle JSX with JS parser
+    elif ext == ".ts":
+        return "typescript"
+    elif ext == ".tsx":
+        return "tsx"
     return "unknown"
 
-def analyze_python_file(file_path: str, file_model: models.File, db: Session, repo_id: int):
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        tree = ast.parse(content)
-        
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                sym = models.Symbol(
-                    file_id=file_model.id,
-                    name=node.name,
-                    symbol_type="function",
-                    start_line=node.lineno,
-                    end_line=node.end_lineno
-                )
-                db.add(sym)
-            elif isinstance(node, ast.ClassDef):
-                sym = models.Symbol(
-                    file_id=file_model.id,
-                    name=node.name,
-                    symbol_type="class",
-                    start_line=node.lineno,
-                    end_line=node.end_lineno
-                )
-                db.add(sym)
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    dep = models.Dependency(
-                        repository_id=repo_id,
-                        source_file_id=file_model.id,
-                        dependency_type="import",
-                        target_name=alias.name
-                    )
-                    db.add(dep)
-            elif isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                for alias in node.names:
-                    dep = models.Dependency(
-                        repository_id=repo_id,
-                        source_file_id=file_model.id,
-                        dependency_type="import_from",
-                        target_name=f"{module}.{alias.name}"
-                    )
-                    db.add(dep)
-    except Exception as e:
-        pass # The analyzer must never crash because one source file cannot be parsed
+from backend.fastapi_app.services.parsers import extract_symbols, extract_dependencies
 
-def analyze_js_file(file_path: str, file_model: models.File, db: Session, repo_id: int):
+def analyze_file(file_path: str, file_model: models.File, db: Session, repo_id: int, lang: str):
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
+    except Exception:
+        return
         
-        # Very basic regex for imports
-        import_regex = re.compile(r'import\s+.*?\s+from\s+[\'"](.*?)[\'"]')
-        for match in import_regex.finditer(content):
+    try:
+        symbols = extract_symbols(content, lang)
+        for sym_name, sym_info in symbols.items():
+            sym = models.Symbol(
+                file_id=file_model.id,
+                name=sym_name,
+                symbol_type=sym_info["type"],
+                start_line=sym_info["start_line"],
+                end_line=sym_info["end_line"]
+            )
+            db.add(sym)
+            
+        deps = extract_dependencies(content, lang)
+        for dep_info in deps:
             dep = models.Dependency(
                 repository_id=repo_id,
                 source_file_id=file_model.id,
-                dependency_type="import",
-                target_name=match.group(1)
+                dependency_type=dep_info["type"],
+                target_name=dep_info["target"]
             )
             db.add(dep)
-    except Exception:
-        pass
-
+    except Exception as e:
+        pass # The analyzer must never crash because one source file cannot be parsed
 
 def run_analysis(repo_id: int, db: Session):
     run = db.query(models.AnalysisRun).filter(models.AnalysisRun.repository_id == repo_id, models.AnalysisRun.status == "pending").first()
@@ -142,10 +115,8 @@ def run_analysis(repo_id: int, db: Session):
                 db.add(f_model)
                 db.flush() # to get id
 
-                if lang == "python":
-                    analyze_python_file(file_path, f_model, db, repo_id)
-                elif lang == "javascript":
-                    analyze_js_file(file_path, f_model, db, repo_id)
+                if lang in ("python", "javascript", "typescript", "tsx", "jsx"):
+                    analyze_file(file_path, f_model, db, repo_id, lang)
         
         # Extract git history
         from backend.fastapi_app.services.git_history_service import extract_git_history

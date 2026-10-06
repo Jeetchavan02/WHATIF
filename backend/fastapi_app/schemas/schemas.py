@@ -112,6 +112,7 @@ class CommitSymbolChangeResponse(BaseModel):
 
 class FileChangeWithSymbolsResponse(BaseModel):
     path: str
+    language: Optional[str] = None
     change_type: str
     symbols: List[CommitSymbolChangeResponse] = []
 

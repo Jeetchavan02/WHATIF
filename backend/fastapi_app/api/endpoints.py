@@ -5,7 +5,7 @@ from typing import List
 from backend.fastapi_app.schemas import schemas
 from backend.fastapi_app.models import models
 from backend.fastapi_app.core.database import get_db
-from backend.fastapi_app.core.analyzer import run_analysis
+from backend.fastapi_app.core.analyzer import run_analysis, get_language
 
 router = APIRouter()
 
@@ -160,8 +160,10 @@ def get_commit_changes(commit_id: int, db: Session = Depends(get_db)):
                 "new_start_line": sc.new_start_line,
                 "new_end_line": sc.new_end_line
             })
+        lang = get_language(fc.file_path)
         files_out.append({
             "path": fc.file_path,
+            "language": lang,
             "change_type": fc.change_type,
             "symbols": symbols_out
         })
@@ -234,7 +236,7 @@ def get_change_map(repository_id: int, db: Session = Depends(get_db)):
             if not symbols_out:
                 symbols_out.append({
                     "name": "<file-level-only>",
-                    "change_type": "unsupported",
+                    "change_type": fc.change_type,
                     "dependencies": file_deps
                 })
                 

@@ -11,40 +11,6 @@ logger = logging.getLogger(__name__)
 
 import ast
 
-def extract_symbols_from_code(code: str):
-    symbols = {}
-    try:
-        tree = ast.parse(code)
-    except Exception:
-        return symbols
-
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            symbols[node.name] = {
-                "type": "function",
-                "start_line": node.lineno,
-                "end_line": getattr(node, "end_lineno", node.lineno),
-                "body_dump": ast.dump(node)
-            }
-        elif isinstance(node, ast.ClassDef):
-            symbols[node.name] = {
-                "type": "class",
-                "start_line": node.lineno,
-                "end_line": getattr(node, "end_lineno", node.lineno),
-                "body_dump": ast.dump(node)
-            }
-            # Extract methods
-            for child in ast.iter_child_nodes(node):
-                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    name = f"{node.name}.{child.name}"
-                    symbols[name] = {
-                        "type": "method",
-                        "start_line": child.lineno,
-                        "end_line": getattr(child, "end_lineno", child.lineno),
-                        "body_dump": ast.dump(child)
-                    }
-    return symbols
-
 def get_blob_content(blob):
     if not blob: return ""
     try:
@@ -117,6 +83,11 @@ def extract_git_history(repo_path: str, repo_id: int, db: Session):
                     new_path = diff.b_path
 
                 file_path = diff.b_path or diff.a_path
+                if not file_path: continue
+                
+                from backend.fastapi_app.core.analyzer import IGNORED_DIRS
+                if any(ignored in file_path.split('/') for ignored in IGNORED_DIRS):
+                    continue
 
                 # Calculate additions and deletions from the patch
                 additions = 0
@@ -141,13 +112,22 @@ def extract_git_history(repo_path: str, repo_id: int, db: Session):
                 db.add(file_change)
                 db.flush()
 
-                # Perform symbol-level tracking for Python files
-                if file_path and file_path.endswith('.py'):
+                lang = "unknown"
+                if file_path:
+                    ext = os.path.splitext(file_path)[1].lower()
+                    if ext == ".py": lang = "python"
+                    elif ext == ".js": lang = "javascript"
+                    elif ext == ".jsx": lang = "jsx"
+                    elif ext == ".ts": lang = "typescript"
+                    elif ext == ".tsx": lang = "tsx"
+
+                if lang in ("python", "javascript", "typescript", "tsx", "jsx"):
+                    from backend.fastapi_app.services.parsers import extract_symbols
                     old_code = get_blob_content(diff.a_blob)
                     new_code = get_blob_content(diff.b_blob)
 
-                    old_symbols = extract_symbols_from_code(old_code)
-                    new_symbols = extract_symbols_from_code(new_code)
+                    old_symbols = extract_symbols(old_code, lang)
+                    new_symbols = extract_symbols(new_code, lang)
 
                     all_symbol_names = set(old_symbols.keys()).union(set(new_symbols.keys()))
 
