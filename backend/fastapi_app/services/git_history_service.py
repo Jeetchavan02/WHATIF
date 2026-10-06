@@ -9,6 +9,49 @@ from backend.fastapi_app.models import models
 
 logger = logging.getLogger(__name__)
 
+import ast
+
+def extract_symbols_from_code(code: str):
+    symbols = {}
+    try:
+        tree = ast.parse(code)
+    except Exception:
+        return symbols
+
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            symbols[node.name] = {
+                "type": "function",
+                "start_line": node.lineno,
+                "end_line": getattr(node, "end_lineno", node.lineno),
+                "body_dump": ast.dump(node)
+            }
+        elif isinstance(node, ast.ClassDef):
+            symbols[node.name] = {
+                "type": "class",
+                "start_line": node.lineno,
+                "end_line": getattr(node, "end_lineno", node.lineno),
+                "body_dump": ast.dump(node)
+            }
+            # Extract methods
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    name = f"{node.name}.{child.name}"
+                    symbols[name] = {
+                        "type": "method",
+                        "start_line": child.lineno,
+                        "end_line": getattr(child, "end_lineno", child.lineno),
+                        "body_dump": ast.dump(child)
+                    }
+    return symbols
+
+def get_blob_content(blob):
+    if not blob: return ""
+    try:
+        return blob.data_stream.read().decode('utf-8', errors='ignore')
+    except Exception:
+        return ""
+
 def extract_git_history(repo_path: str, repo_id: int, db: Session):
     try:
         git_repo = Repo(repo_path)
@@ -50,15 +93,14 @@ def extract_git_history(repo_path: str, repo_id: int, db: Session):
             db.add(new_commit)
             db.flush() # flush to get the new_commit.id
 
-            file_changes = []
-
-            # Determine file changes
             if commit.parents:
                 parent = commit.parents[0]
                 diffs = parent.diff(commit, create_patch=True)
             else:
                 # Initial commit: diff against empty tree
                 diffs = commit.diff(git_repo.tree('4b825dc642cb6eb9a060e54bf8d69288fbee4904'), create_patch=True, R=True)
+
+            symbol_changes = []
 
             for diff in diffs:
                 change_type = "modified"
@@ -74,6 +116,8 @@ def extract_git_history(repo_path: str, repo_id: int, db: Session):
                     old_path = diff.a_path
                     new_path = diff.b_path
 
+                file_path = diff.b_path or diff.a_path
+
                 # Calculate additions and deletions from the patch
                 additions = 0
                 deletions = 0
@@ -87,17 +131,64 @@ def extract_git_history(repo_path: str, repo_id: int, db: Session):
 
                 file_change = models.CommitFileChange(
                     commit_id=new_commit.id,
-                    file_path=diff.b_path or diff.a_path,
+                    file_path=file_path,
                     change_type=change_type,
                     additions=additions,
                     deletions=deletions,
                     old_path=old_path,
                     new_path=new_path
                 )
-                file_changes.append(file_change)
-            
-            if file_changes:
-                db.bulk_save_objects(file_changes)
+                db.add(file_change)
+                db.flush()
+
+                # Perform symbol-level tracking for Python files
+                if file_path and file_path.endswith('.py'):
+                    old_code = get_blob_content(diff.a_blob)
+                    new_code = get_blob_content(diff.b_blob)
+
+                    old_symbols = extract_symbols_from_code(old_code)
+                    new_symbols = extract_symbols_from_code(new_code)
+
+                    all_symbol_names = set(old_symbols.keys()).union(set(new_symbols.keys()))
+
+                    for sym_name in all_symbol_names:
+                        old_sym = old_symbols.get(sym_name)
+                        new_sym = new_symbols.get(sym_name)
+
+                        sym_change_type = "unchanged"
+                        if not old_sym and new_sym:
+                            sym_change_type = "added"
+                        elif old_sym and not new_sym:
+                            sym_change_type = "deleted"
+                        elif old_sym and new_sym:
+                            if old_sym["body_dump"] != new_sym["body_dump"]:
+                                sym_change_type = "modified"
+                        
+                        sym_data = new_sym or old_sym
+
+                        symbol_change = models.CommitSymbolChange(
+                            commit_file_change_id=file_change.id,
+                            symbol_name=sym_name,
+                            symbol_type=sym_data["type"],
+                            change_type=sym_change_type,
+                            old_start_line=old_sym["start_line"] if old_sym else None,
+                            old_end_line=old_sym["end_line"] if old_sym else None,
+                            new_start_line=new_sym["start_line"] if new_sym else None,
+                            new_end_line=new_sym["end_line"] if new_sym else None
+                        )
+                        symbol_changes.append(symbol_change)
+                else:
+                    # Unsupported file
+                    symbol_change = models.CommitSymbolChange(
+                        commit_file_change_id=file_change.id,
+                        symbol_name="<file-level-only>",
+                        symbol_type="unsupported",
+                        change_type="unsupported"
+                    )
+                    symbol_changes.append(symbol_change)
+
+            if symbol_changes:
+                db.bulk_save_objects(symbol_changes)
             
             # Commit changes periodically per commit to save progress and memory
             db.commit()

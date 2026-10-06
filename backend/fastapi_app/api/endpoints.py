@@ -139,3 +139,113 @@ def get_history_stats(repository_id: int, db: Session = Depends(get_db)):
         "total_renamed_files": stats.total_renamed or 0,
         "most_frequently_changed_files": freq_files_list
     }
+
+@router.get("/commits/{commit_id}/changes", response_model=schemas.CommitChangesResponse)
+def get_commit_changes(commit_id: int, db: Session = Depends(get_db)):
+    commit = db.query(models.Commit).filter(models.Commit.id == commit_id).first()
+    if not commit:
+        raise HTTPException(status_code=404, detail="Commit not found")
+    
+    files_out = []
+    for fc in commit.file_changes:
+        symbols_out = []
+        for sc in fc.symbol_changes:
+            symbols_out.append({
+                "id": sc.id,
+                "symbol_name": sc.symbol_name,
+                "symbol_type": sc.symbol_type,
+                "change_type": sc.change_type,
+                "old_start_line": sc.old_start_line,
+                "old_end_line": sc.old_end_line,
+                "new_start_line": sc.new_start_line,
+                "new_end_line": sc.new_end_line
+            })
+        files_out.append({
+            "path": fc.file_path,
+            "change_type": fc.change_type,
+            "symbols": symbols_out
+        })
+        
+    return {
+        "commit": commit.commit_hash,
+        "files": files_out
+    }
+
+@router.get("/repositories/{repository_id}/symbols/{symbol_id}/history")
+def get_symbol_history(repository_id: int, symbol_id: int, db: Session = Depends(get_db)):
+    # Assuming symbol_id refers to a record in `commit_symbol_changes` or `symbols`
+    # The spec asks to show commits in which the symbol was added, modified, or deleted.
+    # We find the symbol_name for the current symbol:
+    symbol = db.query(models.Symbol).filter(models.Symbol.id == symbol_id).first()
+    if not symbol:
+        raise HTTPException(status_code=404, detail="Symbol not found")
+        
+    # Find all symbol changes matching this symbol_name and file in this repo
+    # This requires joining CommitFileChange -> Commit to filter by repo
+    changes = db.query(models.CommitSymbolChange)\
+        .join(models.CommitFileChange)\
+        .join(models.Commit)\
+        .filter(
+            models.Commit.repository_id == repository_id,
+            models.CommitSymbolChange.symbol_name == symbol.name,
+            models.CommitFileChange.file_path == symbol.file.path
+        )\
+        .order_by(models.Commit.committed_at.desc()).all()
+        
+    out = []
+    for sc in changes:
+        out.append({
+            "commit": sc.file_change.commit.commit_hash,
+            "change_type": sc.change_type,
+            "date": sc.file_change.commit.committed_at
+        })
+    return out
+
+@router.get("/repositories/{repository_id}/change-map", response_model=List[schemas.ChangeMapCommitResponse])
+def get_change_map(repository_id: int, db: Session = Depends(get_db)):
+    commits = db.query(models.Commit).filter(models.Commit.repository_id == repository_id).order_by(models.Commit.committed_at.desc()).all()
+    
+    # Pre-fetch file dependencies for the repository
+    all_deps = db.query(models.Dependency).filter(models.Dependency.repository_id == repository_id).all()
+    dep_map = {} # path -> list of target_names
+    for dep in all_deps:
+        source_path = dep.source_file.path if dep.source_file else None
+        if source_path:
+            target = dep.target_file.path if dep.target_file else dep.target_name
+            if source_path not in dep_map:
+                dep_map[source_path] = []
+            if target and target not in dep_map[source_path]:
+                dep_map[source_path].append(target)
+                
+    result = []
+    for commit in commits:
+        files_out = []
+        for fc in commit.file_changes:
+            file_deps = dep_map.get(fc.file_path, [])
+            symbols_out = []
+            for sc in fc.symbol_changes:
+                symbols_out.append({
+                    "name": sc.symbol_name,
+                    "change_type": sc.change_type,
+                    "dependencies": file_deps
+                })
+            
+            # If no symbols are tracked for this file (e.g., non-python), just return the file
+            if not symbols_out:
+                symbols_out.append({
+                    "name": "<file-level-only>",
+                    "change_type": "unsupported",
+                    "dependencies": file_deps
+                })
+                
+            files_out.append({
+                "path": fc.file_path,
+                "symbols": symbols_out
+            })
+        if files_out:
+            result.append({
+                "commit": commit.commit_hash,
+                "files": files_out
+            })
+            
+    return result

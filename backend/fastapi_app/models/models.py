@@ -90,4 +90,20 @@ class CommitFileChange(Base):
     new_path = Column(String, nullable=True)
 
     commit = relationship("Commit", back_populates="file_changes")
+    symbol_changes = relationship("CommitSymbolChange", back_populates="file_change")
 
+class CommitSymbolChange(Base):
+    __tablename__ = "commit_symbol_changes"
+    id = Column(Integer, primary_key=True, index=True)
+    commit_file_change_id = Column(Integer, ForeignKey("commit_file_changes.id"))
+    symbol_id = Column(Integer, ForeignKey("symbols.id"), nullable=True)
+    symbol_name = Column(String, index=True)
+    symbol_type = Column(String)
+    change_type = Column(String) # added, modified, deleted, unchanged
+    old_start_line = Column(Integer, nullable=True)
+    old_end_line = Column(Integer, nullable=True)
+    new_start_line = Column(Integer, nullable=True)
+    new_end_line = Column(Integer, nullable=True)
+
+    file_change = relationship("CommitFileChange", back_populates="symbol_changes")
+    symbol = relationship("Symbol")

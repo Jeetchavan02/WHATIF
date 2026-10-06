@@ -104,18 +104,40 @@ async function showResults(repoId) {
 }
 
 async function viewCommit(commitId) {
-    const res = await fetch(`${API_BASE}/commits/${commitId}`);
-    const commit = await res.json();
+    const res = await fetch(`${API_BASE}/commits/${commitId}/changes`);
+    const commitData = await res.json();
     
-    const viewContent = {
-        hash: commit.commit_hash,
-        author: commit.author_name,
-        date: commit.committed_at,
-        message: commit.message,
-        changes: commit.file_changes
-    };
+    // Also fetch basic commit info for author/message
+    const basicRes = await fetch(`${API_BASE}/commits/${commitId}`);
+    const basicCommit = await basicRes.json();
     
-    document.getElementById("detailsView").innerText = JSON.stringify(viewContent, null, 2);
+    let out = `COMMIT\n${commitData.commit}\n\n`;
+    out += `MESSAGE:\n${basicCommit.message}\n\n`;
+    out += `FILES CHANGED:\n\n`;
+    
+    for (const fc of commitData.files) {
+        out += `${fc.path}\n  ${fc.change_type.toUpperCase()}\n\n`;
+        
+        const symbols = fc.symbols || [];
+        if (symbols.length > 0) {
+            out += `SYMBOL CHANGES:\n\n`;
+            for (const sc of symbols) {
+                out += `${sc.symbol_name}()\n  ${sc.change_type.toUpperCase()}\n`;
+                if (sc.change_type !== "unsupported") {
+                    if (sc.change_type === "modified") {
+                        out += `  Lines: ${sc.old_start_line} -> ${sc.new_start_line}\n`;
+                    } else if (sc.change_type === "added") {
+                        out += `  Lines: ${sc.new_start_line}-${sc.new_end_line}\n`;
+                    } else if (sc.change_type === "deleted") {
+                        out += `  Lines: ${sc.old_start_line}-${sc.old_end_line}\n`;
+                    }
+                }
+                out += `\n`;
+            }
+        }
+    }
+    
+    document.getElementById("detailsView").innerText = out;
 }
 
 async function fetchFiles() {

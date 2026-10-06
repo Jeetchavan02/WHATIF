@@ -96,3 +96,38 @@ class HistoryStatsResponse(BaseModel):
     total_deleted_files: int
     total_renamed_files: int
     most_frequently_changed_files: List[dict]
+
+class CommitSymbolChangeResponse(BaseModel):
+    id: int
+    symbol_name: str
+    symbol_type: str
+    change_type: str
+    old_start_line: Optional[int] = None
+    old_end_line: Optional[int] = None
+    new_start_line: Optional[int] = None
+    new_end_line: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+class FileChangeWithSymbolsResponse(BaseModel):
+    path: str
+    change_type: str
+    symbols: List[CommitSymbolChangeResponse] = []
+
+class CommitChangesResponse(BaseModel):
+    commit: str
+    files: List[FileChangeWithSymbolsResponse] = []
+
+class ChangeMapSymbolResponse(BaseModel):
+    name: str
+    change_type: str
+    dependencies: List[str] = []
+
+class ChangeMapFileResponse(BaseModel):
+    path: str
+    symbols: List[ChangeMapSymbolResponse] = []
+
+class ChangeMapCommitResponse(BaseModel):
+    commit: str
+    files: List[ChangeMapFileResponse] = []

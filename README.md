@@ -99,3 +99,35 @@ pytest backend/tests/test_git_history.py
 ### Known Limitations
 - Git history collection can be slow for extremely large repositories since it parses every patch to count line-level additions and deletions.
 - Idempotency logic only checks if a commit hash exists; it does not currently resume an interrupted analysis midway cleanly without rescanning if the previous scan crashed mid-commit.
+
+## Milestone 3: Symbol-Level Change Analysis
+WHATIF connects Git history to code semantics. It currently performs structural change analysis for Python files using Abstract Syntax Trees (AST). **It does not yet predict impact.**
+
+### Symbol Tracking (Python)
+For every commit that modifies a `.py` file, WHATIF compares the parent file and the new file:
+- **Added**: Symbol exists after but not before.
+- **Deleted**: Symbol exists before but not after.
+- **Modified**: Symbol exists in both, but the normalized AST body `ast.dump()` differs.
+- **Unchanged**: Symbol exists in both and `ast.dump()` matches.
+
+For non-Python files, symbol-level analysis is marked as `unsupported`.
+
+### Historical Symbol Tracking
+Symbols are tracked historically with exact line numbers (`old_start_line`, `new_start_line`, etc.) to map out precisely where an implementation shifted over time. Methods are appropriately namespaced to their classes (e.g. `User.authenticate`).
+
+### New API Endpoints
+- `GET /api/commits/{id}/changes` - Retrieve hierarchical changes (Commit -> Files -> Symbols) with line numbers.
+- `GET /api/repositories/{id}/symbols/{symbol_id}/history` - View the commit history where a specific symbol was added, modified, or deleted.
+- `GET /api/repositories/{id}/change-map` - A structured output of historical dependencies across the entire repository.
+
+### Testing
+We simulate Python file modifications (adding methods, modifying methods, deleting methods) dynamically via a temporary Git repository fixture using `pytest`.
+```bash
+export PYTHONPATH=$PWD
+pytest backend/tests/test_git_history_symbols.py
+```
+
+### Known Limitations
+- WHATIF identifies symbol identity strictly by `file_path + type + name`. It does not yet perform sophisticated rename tracking.
+- Only Python is officially supported for deep AST symbol-level structural analysis at this stage. Other languages will only report file-level differences.
+- Dependency linking is currently file-level and mapped indirectly to the symbol. Direct symbol-to-symbol relationships are a future milestone.
