@@ -403,3 +403,9 @@ def compute_whatif_scenario(repository_id: int, request: schemas.WhatIfRequest, 
     )
 
     return result
+
+from backend.fastapi_app.services.evaluation_service import evaluate_commit
+
+@router.post("/repositories/{repository_id}/evaluate", response_model=schemas.EvaluationResponse)
+def compute_evaluation(repository_id: int, request: schemas.EvaluationRequest, db: Session = Depends(get_db)):
+    return evaluate_commit(db, repository_id, request)

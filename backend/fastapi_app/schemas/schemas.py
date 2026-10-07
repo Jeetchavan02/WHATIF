@@ -222,3 +222,28 @@ class WhatIfResponse(BaseModel):
     historical_impact: WhatIfHistoricalSummary
     affected_components: List[WhatIfComponent]
 
+class EvaluationRequest(BaseModel):
+    commit_id: int
+    source_file_id: int
+    max_depth: int = 5
+
+class EvaluationSet(BaseModel):
+    count: int
+    file_ids: List[int]
+
+class EvaluationMetrics(BaseModel):
+    precision: float
+    recall: float
+    f1: float
+
+class EvaluationResponse(BaseModel):
+    repository_id: int
+    commit_id: int
+    source_file_id: int
+    actual_impact: EvaluationSet
+    calculated_impact: EvaluationSet
+    true_positives: EvaluationSet
+    false_positives: EvaluationSet
+    false_negatives: EvaluationSet
+    metrics: EvaluationMetrics
+
