@@ -352,3 +352,19 @@ def get_impact(repository_id: int, node_type: str, node_id: int, max_depth: int 
         },
         "affected": affected
     }
+
+from backend.fastapi_app.services.history_impact_service import get_historical_co_changes
+
+@router.get("/repositories/{repository_id}/history/co-change/file/{file_id}", response_model=schemas.HistoricalCoChangeResponse)
+def get_historical_co_change(repository_id: int, file_id: int, limit: int = 100, db: Session = Depends(get_db)):
+    repo = db.query(models.Repository).filter(models.Repository.id == repository_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+        
+    file_record = db.query(models.File).filter(models.File.id == file_id, models.File.repository_id == repository_id).first()
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found in this repository")
+        
+    result = get_historical_co_changes(repository_id, "file", file_id, db, limit=limit)
+    
+    return result

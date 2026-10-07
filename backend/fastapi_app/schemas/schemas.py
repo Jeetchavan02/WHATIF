@@ -169,3 +169,19 @@ class ImpactSourceNode(BaseModel):
 class ImpactResponse(BaseModel):
     source: ImpactSourceNode
     affected: List[ImpactNode]
+
+class HistoricalCoChangeNode(BaseModel):
+    node_type: str
+    node_id: int
+    co_change_count: int
+    probability: float
+
+class HistoricalSourceNode(BaseModel):
+    node_type: str
+    node_id: int
+
+class HistoricalCoChangeResponse(BaseModel):
+    source: HistoricalSourceNode
+    source_change_count: int
+    co_changes: List[HistoricalCoChangeNode]
+
