@@ -131,3 +131,145 @@ pytest backend/tests/test_git_history_symbols.py
 - WHATIF identifies symbol identity strictly by `file_path + type + name`. It does not yet perform sophisticated rename tracking.
 - Only Python is officially supported for deep AST symbol-level structural analysis at this stage. Other languages will only report file-level differences.
 - Dependency linking is currently file-level and mapped indirectly to the symbol. Direct symbol-to-symbol relationships are a future milestone.
+
+## M10 — Batch Research Benchmarking
+
+M10 extends the single-commit evaluation introduced in M9 into a deterministic batch benchmark.
+
+### Workflow
+
+```text
+Historical Commits
+        ↓
+Deterministic Source Selection
+        ↓
+┌──────────────┬──────────────┬──────────────┐
+│ Structural   │ Historical   │ Combined     │
+│ Impact       │ Impact       │ WHATIF       │
+└──────────────┴──────────────┴──────────────┘
+        ↓
+Actual Historical Changes
+        ↓
+TP / FP / FN
+        ↓
+Precision / Recall / F1
+        ↓
+Aggregate Benchmark Results
+```
+
+### 1. Why M10 Exists
+
+M9 evaluates a single historical commit. M10 asks whether the behavior generalizes across multiple historical commits. The benchmark allows comparison of:
+- structural dependency evidence
+- historical co-change evidence
+- combined WHATIF evidence
+
+The goal is not to optimize for a particular score. The goal is to measure the behavior of each approach honestly.
+
+### 2. Three Methods
+
+| Method | Evidence | Description |
+|---|---|---|
+| Structural | Dependency graph | Uses deterministic reverse dependency traversal |
+| Historical | Git co-change history | Uses historical files that changed alongside the source |
+| Combined | Structural + historical | Uses the existing WHATIF hypothetical-change analysis |
+
+- **STRUCTURAL** uses the M6 impact propagation service to calculate structural impact.
+- **HISTORICAL** uses the M7 historical co-change service to retrieve a historical candidate impact set.
+- **COMBINED** uses the M8 hypothetical change analysis to generate a combined calculated impact set.
+
+### 3. Benchmark Dataset
+
+Commits are selected deterministically, ordered by `committed_at` and `commit ID`. Commits must contain multiple changed files, and source files must be supported source-code files.
+
+Supported source extensions currently include:
+- `.py`
+- `.js`
+- `.jsx`
+- `.ts`
+- `.tsx`
+
+Non-source files such as `.env`, `.gitignore`, `README.md` and package metadata are not selected as source components. Source selection is deterministic, and commits without eligible source files are skipped.
+
+### 4. Ground Truth
+
+Ground truth comes directly from Git history. For an evaluation case:
+
+Actual Impact Set = files that actually changed in the historical commit, excluding the selected source file.
+
+M7 is an input/evidence source for the Historical and Combined methods, while the actual commit changes provide the evaluation ground truth.
+
+### 5. Metrics
+
+- **True Positive (TP):** A file calculated as impacted that actually changed.
+- **False Positive (FP):** A file calculated as impacted that did not actually change.
+- **False Negative (FN):** A file that actually changed but was not included in the calculated impact set.
+
+- **Precision** = TP / (TP + FP)
+- **Recall** = TP / (TP + FN)
+- **F1** = 2 × Precision × Recall / (Precision + Recall)
+
+Zero-denominator cases are handled deterministically by returning 0.0 according to the implementation.
+
+### 6. Aggregation
+
+M10 reports macro-averages across benchmark cases:
+- mean precision, median precision, minimum precision, maximum precision
+- mean recall, median recall, minimum recall, maximum recall
+- mean F1, median F1, minimum F1, maximum F1
+
+The primary aggregate is the macro-average because a large commit should not dominate the benchmark simply because it contains more changed files.
+
+### 7. API
+
+`POST /api/repositories/{repository_id}/benchmark`
+
+Example request:
+```json
+{
+  "limit": 10,
+  "max_depth": 5,
+  "historical_limit": 50
+}
+```
+
+Parameters:
+- `limit`: maximum number of eligible benchmark cases.
+- `max_depth`: maximum structural dependency traversal depth.
+- `historical_limit`: maximum number of historical co-change candidates considered.
+
+### 8. Response
+
+The endpoint returns:
+- `repository_id`
+- benchmark parameters
+- `case_count`
+- structural aggregate metrics
+- historical aggregate metrics
+- combined aggregate metrics
+- individual benchmark `cases`
+
+Each benchmark case includes:
+- commit ID
+- commit hash
+- source file ID
+- source file path
+- actual impact count
+- structural metrics
+- historical metrics
+- combined metrics
+
+### 9. Reproducibility
+
+Benchmark selection is deterministic. Given identical repository, `limit`, `max_depth`, `historical_limit`, and repository analysis state, the benchmark produces the same evaluation cases and ordering. No random sampling is used.
+
+### Example Benchmark Run
+
+```text
+Repository: AutoFair
+Repository ID: 11
+Limit: 10
+Max Depth: 5
+Historical Limit: 50
+Eligible Cases: 7
+```
