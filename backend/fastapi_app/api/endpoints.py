@@ -14,7 +14,7 @@ def create_repository(repo: schemas.RepositoryCreate, db: Session = Depends(get_
     existing_repo = db.query(models.Repository).filter(models.Repository.url == repo.url).first()
     if existing_repo:
         return existing_repo
-    
+
     db_repo = models.Repository(url=repo.url, name=repo.name)
     db.add(db_repo)
     db.commit()
@@ -30,11 +30,11 @@ def start_analysis(repository_id: int, background_tasks: BackgroundTasks, db: Se
     repo = db.query(models.Repository).filter(models.Repository.id == repository_id).first()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
-    
+
     run = models.AnalysisRun(repository_id=repository_id, status="pending")
     db.add(run)
     db.commit()
-    
+
     background_tasks.add_task(run_analysis, repository_id, db)
     return {"message": "Analysis started", "analysis_id": run.id}
 
@@ -66,9 +66,9 @@ from datetime import datetime
 
 @router.get("/repositories/{repository_id}/commits", response_model=List[schemas.CommitResponse])
 def get_repository_commits(
-    repository_id: int, 
-    page: int = 1, 
-    page_size: int = 20, 
+    repository_id: int,
+    page: int = 1,
+    page_size: int = 20,
     author: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
@@ -81,10 +81,10 @@ def get_repository_commits(
         query = query.filter(models.Commit.committed_at >= date_from)
     if date_to:
         query = query.filter(models.Commit.committed_at <= date_to)
-    
+
     # Order by committed_at descending
     query = query.order_by(models.Commit.committed_at.desc())
-    
+
     offset = (page - 1) * page_size
     return query.offset(offset).limit(page_size).all()
 
@@ -98,7 +98,7 @@ def get_commit_by_id(commit_id: int, db: Session = Depends(get_db)):
 @router.get("/repositories/{repository_id}/commits/{commit_hash}", response_model=schemas.CommitResponse)
 def get_commit_by_hash(repository_id: int, commit_hash: str, db: Session = Depends(get_db)):
     commit = db.query(models.Commit).filter(
-        models.Commit.repository_id == repository_id, 
+        models.Commit.repository_id == repository_id,
         models.Commit.commit_hash == commit_hash
     ).first()
     if not commit:
@@ -108,7 +108,7 @@ def get_commit_by_hash(repository_id: int, commit_hash: str, db: Session = Depen
 @router.get("/repositories/{repository_id}/history/stats", response_model=schemas.HistoryStatsResponse)
 def get_history_stats(repository_id: int, db: Session = Depends(get_db)):
     total_commits = db.query(models.Commit).filter(models.Commit.repository_id == repository_id).count()
-    
+
     stats = db.query(
         func.sum(models.CommitFileChange.additions).label('total_additions'),
         func.sum(models.CommitFileChange.deletions).label('total_deletions'),
@@ -120,7 +120,7 @@ def get_history_stats(repository_id: int, db: Session = Depends(get_db)):
 
     # Most frequently changed files
     freq_files = db.query(
-        models.CommitFileChange.file_path, 
+        models.CommitFileChange.file_path,
         func.count(models.CommitFileChange.id).label('change_count')
     ).join(models.Commit).filter(models.Commit.repository_id == repository_id)\
     .group_by(models.CommitFileChange.file_path)\
@@ -145,7 +145,7 @@ def get_commit_changes(commit_id: int, db: Session = Depends(get_db)):
     commit = db.query(models.Commit).filter(models.Commit.id == commit_id).first()
     if not commit:
         raise HTTPException(status_code=404, detail="Commit not found")
-    
+
     files_out = []
     for fc in commit.file_changes:
         symbols_out = []
@@ -167,7 +167,7 @@ def get_commit_changes(commit_id: int, db: Session = Depends(get_db)):
             "change_type": fc.change_type,
             "symbols": symbols_out
         })
-        
+
     return {
         "commit": commit.commit_hash,
         "files": files_out
@@ -181,7 +181,7 @@ def get_symbol_history(repository_id: int, symbol_id: int, db: Session = Depends
     symbol = db.query(models.Symbol).filter(models.Symbol.id == symbol_id).first()
     if not symbol:
         raise HTTPException(status_code=404, detail="Symbol not found")
-        
+
     # Find all symbol changes matching this symbol_name and file in this repo
     # This requires joining CommitFileChange -> Commit to filter by repo
     changes = db.query(models.CommitSymbolChange)\
@@ -193,7 +193,7 @@ def get_symbol_history(repository_id: int, symbol_id: int, db: Session = Depends
             models.CommitFileChange.file_path == symbol.file.path
         )\
         .order_by(models.Commit.committed_at.desc()).all()
-        
+
     out = []
     for sc in changes:
         out.append({
@@ -206,7 +206,7 @@ def get_symbol_history(repository_id: int, symbol_id: int, db: Session = Depends
 @router.get("/repositories/{repository_id}/change-map", response_model=List[schemas.ChangeMapCommitResponse])
 def get_change_map(repository_id: int, db: Session = Depends(get_db)):
     commits = db.query(models.Commit).filter(models.Commit.repository_id == repository_id).order_by(models.Commit.committed_at.desc()).all()
-    
+
     # Pre-fetch file dependencies for the repository
     all_deps = db.query(models.Dependency).filter(models.Dependency.repository_id == repository_id).all()
     dep_map = {} # path -> list of target_names
@@ -218,7 +218,7 @@ def get_change_map(repository_id: int, db: Session = Depends(get_db)):
                 dep_map[source_path] = []
             if target and target not in dep_map[source_path]:
                 dep_map[source_path].append(target)
-                
+
     result = []
     for commit in commits:
         files_out = []
@@ -231,7 +231,7 @@ def get_change_map(repository_id: int, db: Session = Depends(get_db)):
                     "change_type": sc.change_type,
                     "dependencies": file_deps
                 })
-            
+
             # If no symbols are tracked for this file (e.g., non-python), just return the file
             if not symbols_out:
                 symbols_out.append({
@@ -239,7 +239,7 @@ def get_change_map(repository_id: int, db: Session = Depends(get_db)):
                     "change_type": fc.change_type,
                     "dependencies": file_deps
                 })
-                
+
             files_out.append({
                 "path": fc.file_path,
                 "symbols": symbols_out
@@ -249,7 +249,7 @@ def get_change_map(repository_id: int, db: Session = Depends(get_db)):
                 "commit": commit.commit_hash,
                 "files": files_out
             })
-            
+
     return result
 
 from backend.fastapi_app.services.graph_service import build_repository_graph
@@ -265,11 +265,11 @@ def build_graph(repository_id: int, db: Session = Depends(get_db)):
 @router.get("/repositories/{repository_id}/graph")
 def get_graph(repository_id: int, db: Session = Depends(get_db)):
     edges = db.query(models.GraphEdge).filter(models.GraphEdge.repository_id == repository_id).all()
-    
+
     # Practical deterministic response
     nodes_set = set()
     edges_list = []
-    
+
     for e in edges:
         nodes_set.add((e.source_type, e.source_id))
         nodes_set.add((e.target_type, e.target_id))
@@ -279,9 +279,9 @@ def get_graph(repository_id: int, db: Session = Depends(get_db)):
             "target": f"{e.target_type}:{e.target_id}",
             "edge_type": e.edge_type
         })
-        
+
     nodes_list = [{"id": f"{ntype}:{nid}", "type": ntype, "ref_id": nid} for ntype, nid in nodes_set]
-    
+
     return {
         "nodes": nodes_list,
         "edges": edges_list
@@ -298,10 +298,10 @@ def get_node_data(node_type: str, node_id: int, db: Session):
         node = db.query(models.Commit).filter(models.Commit.id == node_id).first()
     else:
         raise HTTPException(status_code=400, detail="Unsupported node_type")
-        
+
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
-        
+
     # Serialize practically by dropping non-JSON attributes
     return {k: v for k, v in node.__dict__.items() if not k.startswith("_")}
 
@@ -309,21 +309,21 @@ def get_node_data(node_type: str, node_id: int, db: Session):
 def get_graph_node(repository_id: int, node_type: str, node_id: int, db: Session = Depends(get_db)):
     if node_type not in ["repository", "file", "symbol", "commit"]:
         raise HTTPException(status_code=400, detail="Unsupported node_type")
-        
+
     node_data = get_node_data(node_type, node_id, db)
-    
+
     outgoing = db.query(models.GraphEdge).filter(
         models.GraphEdge.repository_id == repository_id,
         models.GraphEdge.source_type == node_type,
         models.GraphEdge.source_id == node_id
     ).all()
-    
+
     incoming = db.query(models.GraphEdge).filter(
         models.GraphEdge.repository_id == repository_id,
         models.GraphEdge.target_type == node_type,
         models.GraphEdge.target_id == node_id
     ).all()
-    
+
     return {
         "node": node_data,
         "outgoing": outgoing,
@@ -336,15 +336,15 @@ from backend.fastapi_app.services.impact_service import get_impact_propagation
 def get_impact(repository_id: int, node_type: str, node_id: int, max_depth: int = 10, db: Session = Depends(get_db)):
     if node_type not in ["repository", "file", "symbol", "commit"]:
         raise HTTPException(status_code=400, detail="Unsupported node_type")
-        
+
     repo = db.query(models.Repository).filter(models.Repository.id == repository_id).first()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
-        
+
     node_data = get_node_data(node_type, node_id, db)
-    
+
     affected = get_impact_propagation(repository_id, node_type, node_id, db, max_depth=max_depth)
-    
+
     return {
         "source": {
             "node_type": node_type,
@@ -360,11 +360,46 @@ def get_historical_co_change(repository_id: int, file_id: int, limit: int = 100,
     repo = db.query(models.Repository).filter(models.Repository.id == repository_id).first()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
-        
+
     file_record = db.query(models.File).filter(models.File.id == file_id, models.File.repository_id == repository_id).first()
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found in this repository")
-        
+
     result = get_historical_co_changes(repository_id, "file", file_id, db, limit=limit)
-    
+
+    return result
+
+from backend.fastapi_app.services.whatif_service import analyze_hypothetical_change
+
+@router.post("/repositories/{repository_id}/whatif", response_model=schemas.WhatIfResponse)
+def compute_whatif_scenario(repository_id: int, request: schemas.WhatIfRequest, db: Session = Depends(get_db)):
+    repo = db.query(models.Repository).filter(models.Repository.id == repository_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    if request.node_type not in ["file", "symbol"]:
+        raise HTTPException(status_code=400, detail="Unsupported node_type")
+
+    # Validate the source node exists in this repository
+    if request.node_type == "file":
+        node = db.query(models.File).filter_by(id=request.node_id, repository_id=repository_id).first()
+    else:
+        # For symbols, we'd join with files, but for M8 we're mostly testing file
+        node = db.query(models.Symbol).join(models.File).filter(
+            models.Symbol.id == request.node_id,
+            models.File.repository_id == repository_id
+        ).first()
+
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found in this repository")
+
+    result = analyze_hypothetical_change(
+        repository_id,
+        request.node_type,
+        request.node_id,
+        db,
+        max_depth=request.max_depth,
+        historical_limit=request.historical_limit
+    )
+
     return result

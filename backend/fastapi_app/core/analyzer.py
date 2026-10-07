@@ -31,7 +31,7 @@ def analyze_file(file_path: str, file_model: models.File, db: Session, repo_id: 
             content = f.read()
     except Exception:
         return
-        
+
     try:
         symbols = extract_symbols(content, lang)
         for sym_name, sym_info in symbols.items():
@@ -43,7 +43,7 @@ def analyze_file(file_path: str, file_model: models.File, db: Session, repo_id: 
                 end_line=sym_info["end_line"]
             )
             db.add(sym)
-            
+
         deps = extract_dependencies(content, lang)
         for dep_info in deps:
             dep = models.Dependency(
@@ -67,12 +67,12 @@ def run_analysis(repo_id: int, db: Session):
         db.commit()
 
     repo = db.query(models.Repository).filter(models.Repository.id == repo_id).first()
-    
+
     try:
         local_path = repo.url
         is_remote = repo.url.startswith("http://") or repo.url.startswith("https://")
         temp_dir = None
-        
+
         if is_remote:
             import tempfile
             import shutil
@@ -86,50 +86,76 @@ def run_analysis(repo_id: int, db: Session):
         else:
             if not os.path.exists(local_path) or not os.path.isdir(local_path):
                 raise ValueError(f"Path does not exist or is not a directory: {local_path}")
-            
+
             try:
                 git_repo = Repo(local_path)
             except InvalidGitRepositoryError:
                 raise ValueError(f"Not a valid git repository: {local_path}")
-        
+
         for root, dirs, files in os.walk(local_path):
             dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
-            
+
             for file_name in files:
                 file_path = os.path.join(root, file_name)
                 rel_path = os.path.relpath(file_path, local_path)
-                
+
                 lang = get_language(file_path)
-                
+
                 try:
                     size = os.path.getsize(file_path)
                 except OSError:
                     continue
 
-                f_model = models.File(
-                    repository_id=repo_id,
-                    path=rel_path,
-                    language=lang,
-                    size=size
-                )
-                db.add(f_model)
-                db.flush() # to get id
+                from sqlalchemy.exc import IntegrityError
+
+                f_model = db.query(models.File).filter_by(repository_id=repo_id, path=rel_path).first()
+                if f_model:
+                    f_model.language = lang
+                    f_model.size = size
+
+                    db.query(models.Symbol).filter_by(file_id=f_model.id).delete(synchronize_session=False)
+                    db.query(models.Dependency).filter_by(source_file_id=f_model.id).delete(synchronize_session=False)
+                    db.flush()
+                else:
+                    f_model = models.File(
+                        repository_id=repo_id,
+                        path=rel_path,
+                        language=lang,
+                        size=size
+                    )
+
+                    try:
+                        with db.begin_nested():
+                            db.add(f_model)
+                            db.flush()
+                    except IntegrityError:
+                        # Another process created the file simultaneously.
+                        # The nested transaction is rolled back, but the outer transaction remains active.
+                        f_model = db.query(models.File).filter_by(repository_id=repo_id, path=rel_path).first()
+                        if not f_model:
+                            raise
+
+                        f_model.language = lang
+                        f_model.size = size
+                        db.query(models.Symbol).filter_by(file_id=f_model.id).delete(synchronize_session=False)
+                        db.query(models.Dependency).filter_by(source_file_id=f_model.id).delete(synchronize_session=False)
+                        db.flush()
 
                 if lang in ("python", "javascript", "typescript", "tsx", "jsx"):
                     analyze_file(file_path, f_model, db, repo_id, lang)
-        
+
         # Extract git history
         from backend.fastapi_app.services.git_history_service import extract_git_history
         extract_git_history(local_path, repo_id, db)
-        
+
         if temp_dir:
             import shutil
             shutil.rmtree(temp_dir, ignore_errors=True)
-        
+
         run.status = "completed"
         run.completed_at = datetime.utcnow()
         db.commit()
-        
+
     except Exception as e:
         run.status = "failed"
         run.error_message = str(e)

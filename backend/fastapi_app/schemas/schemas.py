@@ -185,3 +185,40 @@ class HistoricalCoChangeResponse(BaseModel):
     source_change_count: int
     co_changes: List[HistoricalCoChangeNode]
 
+class WhatIfRequest(BaseModel):
+    node_type: str
+    node_id: int
+    max_depth: int = 10
+    historical_limit: int = 100
+
+class WhatIfStructuralData(BaseModel):
+    depth: int
+    reason: str
+
+class WhatIfHistoricalData(BaseModel):
+    co_change_count: int
+    co_change_rate: float
+
+class WhatIfComponent(BaseModel):
+    node_type: str
+    node_id: int
+    classification: str
+    path: Optional[str] = None
+    structural: Optional[WhatIfStructuralData] = None
+    historical: Optional[WhatIfHistoricalData] = None
+
+class WhatIfStructuralSummary(BaseModel):
+    total_affected: int
+    direct_affected: int
+    transitive_affected: int
+
+class WhatIfHistoricalSummary(BaseModel):
+    source_change_count: int
+    distinct_co_changed_files: int
+
+class WhatIfResponse(BaseModel):
+    source: HistoricalSourceNode
+    structural_impact: WhatIfStructuralSummary
+    historical_impact: WhatIfHistoricalSummary
+    affected_components: List[WhatIfComponent]
+

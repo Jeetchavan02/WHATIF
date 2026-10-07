@@ -28,6 +28,7 @@ class AnalysisRun(Base):
 
 class File(Base):
     __tablename__ = "files"
+    __table_args__ = (UniqueConstraint('repository_id', 'path', name='uq_repo_file_path'),)
     id = Column(Integer, primary_key=True, index=True)
     repository_id = Column(Integer, ForeignKey("repositories.id"))
     path = Column(String, index=True)
