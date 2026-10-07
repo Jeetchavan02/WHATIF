@@ -329,3 +329,26 @@ def get_graph_node(repository_id: int, node_type: str, node_id: int, db: Session
         "outgoing": outgoing,
         "incoming": incoming
     }
+
+from backend.fastapi_app.services.impact_service import get_impact_propagation
+
+@router.get("/repositories/{repository_id}/impact/{node_type}/{node_id}", response_model=schemas.ImpactResponse)
+def get_impact(repository_id: int, node_type: str, node_id: int, max_depth: int = 10, db: Session = Depends(get_db)):
+    if node_type not in ["repository", "file", "symbol", "commit"]:
+        raise HTTPException(status_code=400, detail="Unsupported node_type")
+        
+    repo = db.query(models.Repository).filter(models.Repository.id == repository_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+        
+    node_data = get_node_data(node_type, node_id, db)
+    
+    affected = get_impact_propagation(repository_id, node_type, node_id, db, max_depth=max_depth)
+    
+    return {
+        "source": {
+            "node_type": node_type,
+            "node_id": node_id
+        },
+        "affected": affected
+    }

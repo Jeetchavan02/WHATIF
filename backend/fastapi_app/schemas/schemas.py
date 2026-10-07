@@ -155,3 +155,17 @@ class GraphNodeDetailResponse(BaseModel):
     node: dict
     outgoing: List[GraphEdgeResponse] = []
     incoming: List[GraphEdgeResponse] = []
+
+class ImpactNode(BaseModel):
+    node_type: str
+    node_id: int
+    depth: int
+    reason: str
+
+class ImpactSourceNode(BaseModel):
+    node_type: str
+    node_id: int
+
+class ImpactResponse(BaseModel):
+    source: ImpactSourceNode
+    affected: List[ImpactNode]
