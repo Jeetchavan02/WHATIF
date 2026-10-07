@@ -247,3 +247,51 @@ class EvaluationResponse(BaseModel):
     false_negatives: EvaluationSet
     metrics: EvaluationMetrics
 
+class BenchmarkRequest(BaseModel):
+    limit: int = 50
+    max_depth: int = 5
+    historical_limit: int = 50
+
+class BenchmarkMethodMetrics(BaseModel):
+    predicted_count: int
+    tp: int
+    fp: int
+    fn: int
+    precision: float
+    recall: float
+    f1: float
+
+class BenchmarkCase(BaseModel):
+    commit_id: int
+    commit_hash: str
+    source_file_id: int
+    source_file_path: str
+    actual_impact_count: int
+    structural: BenchmarkMethodMetrics
+    historical: BenchmarkMethodMetrics
+    combined: BenchmarkMethodMetrics
+
+class BenchmarkAggregate(BaseModel):
+    case_count: int
+    mean_precision: float
+    mean_recall: float
+    mean_f1: float
+    median_precision: float
+    median_recall: float
+    median_f1: float
+    min_precision: float
+    min_recall: float
+    min_f1: float
+    max_precision: float
+    max_recall: float
+    max_f1: float
+
+class BenchmarkResponse(BaseModel):
+    repository_id: int
+    parameters: dict
+    case_count: int
+    structural: BenchmarkAggregate
+    historical: BenchmarkAggregate
+    combined: BenchmarkAggregate
+    cases: List[BenchmarkCase]
+

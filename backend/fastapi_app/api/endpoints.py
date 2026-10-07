@@ -409,3 +409,9 @@ from backend.fastapi_app.services.evaluation_service import evaluate_commit
 @router.post("/repositories/{repository_id}/evaluate", response_model=schemas.EvaluationResponse)
 def compute_evaluation(repository_id: int, request: schemas.EvaluationRequest, db: Session = Depends(get_db)):
     return evaluate_commit(db, repository_id, request)
+
+from backend.fastapi_app.services.benchmark_service import run_benchmark
+
+@router.post("/repositories/{repository_id}/benchmark", response_model=schemas.BenchmarkResponse)
+def compute_benchmark(repository_id: int, request: schemas.BenchmarkRequest, db: Session = Depends(get_db)):
+    return run_benchmark(db, repository_id, request)
