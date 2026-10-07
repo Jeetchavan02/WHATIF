@@ -66,3 +66,20 @@ class CommitSymbolChange(models.Model):
 
     def __str__(self):
         return f"{self.change_type} {self.symbol_name}"
+
+class GraphEdge(models.Model):
+    id = models.IntegerField(primary_key=True)
+    repository = models.ForeignKey(Repository, on_delete=models.DO_NOTHING)
+    source_type = models.CharField(max_length=50)
+    source_id = models.IntegerField()
+    target_type = models.CharField(max_length=50)
+    target_id = models.IntegerField()
+    edge_type = models.CharField(max_length=50)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = 'graph_edges'
+
+    def __str__(self):
+        return f"{self.source_type}:{self.source_id} -> {self.target_type}:{self.target_id} ({self.edge_type})"

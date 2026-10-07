@@ -251,3 +251,81 @@ def get_change_map(repository_id: int, db: Session = Depends(get_db)):
             })
             
     return result
+
+from backend.fastapi_app.services.graph_service import build_repository_graph
+
+@router.post("/repositories/{repository_id}/graph/build", response_model=schemas.GraphBuildResponse)
+def build_graph(repository_id: int, db: Session = Depends(get_db)):
+    repo = db.query(models.Repository).filter(models.Repository.id == repository_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    result = build_repository_graph(repository_id, db)
+    return result
+
+@router.get("/repositories/{repository_id}/graph")
+def get_graph(repository_id: int, db: Session = Depends(get_db)):
+    edges = db.query(models.GraphEdge).filter(models.GraphEdge.repository_id == repository_id).all()
+    
+    # Practical deterministic response
+    nodes_set = set()
+    edges_list = []
+    
+    for e in edges:
+        nodes_set.add((e.source_type, e.source_id))
+        nodes_set.add((e.target_type, e.target_id))
+        edges_list.append({
+            "id": e.id,
+            "source": f"{e.source_type}:{e.source_id}",
+            "target": f"{e.target_type}:{e.target_id}",
+            "edge_type": e.edge_type
+        })
+        
+    nodes_list = [{"id": f"{ntype}:{nid}", "type": ntype, "ref_id": nid} for ntype, nid in nodes_set]
+    
+    return {
+        "nodes": nodes_list,
+        "edges": edges_list
+    }
+
+def get_node_data(node_type: str, node_id: int, db: Session):
+    if node_type == "repository":
+        node = db.query(models.Repository).filter(models.Repository.id == node_id).first()
+    elif node_type == "file":
+        node = db.query(models.File).filter(models.File.id == node_id).first()
+    elif node_type == "symbol":
+        node = db.query(models.Symbol).filter(models.Symbol.id == node_id).first()
+    elif node_type == "commit":
+        node = db.query(models.Commit).filter(models.Commit.id == node_id).first()
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported node_type")
+        
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+        
+    # Serialize practically by dropping non-JSON attributes
+    return {k: v for k, v in node.__dict__.items() if not k.startswith("_")}
+
+@router.get("/repositories/{repository_id}/graph/{node_type}/{node_id}", response_model=schemas.GraphNodeDetailResponse)
+def get_graph_node(repository_id: int, node_type: str, node_id: int, db: Session = Depends(get_db)):
+    if node_type not in ["repository", "file", "symbol", "commit"]:
+        raise HTTPException(status_code=400, detail="Unsupported node_type")
+        
+    node_data = get_node_data(node_type, node_id, db)
+    
+    outgoing = db.query(models.GraphEdge).filter(
+        models.GraphEdge.repository_id == repository_id,
+        models.GraphEdge.source_type == node_type,
+        models.GraphEdge.source_id == node_id
+    ).all()
+    
+    incoming = db.query(models.GraphEdge).filter(
+        models.GraphEdge.repository_id == repository_id,
+        models.GraphEdge.target_type == node_type,
+        models.GraphEdge.target_id == node_id
+    ).all()
+    
+    return {
+        "node": node_data,
+        "outgoing": outgoing,
+        "incoming": incoming
+    }

@@ -44,3 +44,11 @@ class CommitSymbolChangeAdmin(admin.ModelAdmin):
     list_display = ('symbol_name', 'symbol_type', 'change_type', 'file_change')
     list_filter = ('change_type', 'symbol_type', LanguageFilter, 'file_change__commit__repository')
     search_fields = ('symbol_name', 'file_change__file_path')
+
+from .models import GraphEdge
+
+@admin.register(GraphEdge)
+class GraphEdgeAdmin(admin.ModelAdmin):
+    list_display = ('id', 'source_type', 'source_id', 'edge_type', 'target_type', 'target_id')
+    list_filter = ('repository', 'source_type', 'target_type', 'edge_type')
+    search_fields = ('source_id', 'target_id')

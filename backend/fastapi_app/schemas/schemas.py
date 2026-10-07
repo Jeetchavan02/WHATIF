@@ -132,3 +132,26 @@ class ChangeMapFileResponse(BaseModel):
 class ChangeMapCommitResponse(BaseModel):
     commit: str
     files: List[ChangeMapFileResponse] = []
+
+class GraphBuildResponse(BaseModel):
+    repository_id: int
+    nodes_created: int
+    edges_created: int
+
+class GraphEdgeResponse(BaseModel):
+    id: int
+    repository_id: int
+    source_type: str
+    source_id: int
+    target_type: str
+    target_id: int
+    edge_type: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class GraphNodeDetailResponse(BaseModel):
+    node: dict
+    outgoing: List[GraphEdgeResponse] = []
+    incoming: List[GraphEdgeResponse] = []

@@ -107,3 +107,18 @@ class CommitSymbolChange(Base):
 
     file_change = relationship("CommitFileChange", back_populates="symbol_changes")
     symbol = relationship("Symbol")
+
+class GraphEdge(Base):
+    __tablename__ = "graph_edges"
+    __table_args__ = (UniqueConstraint('repository_id', 'source_type', 'source_id', 'target_type', 'target_id', 'edge_type', name='uq_graph_edge'),)
+    
+    id = Column(Integer, primary_key=True, index=True)
+    repository_id = Column(Integer, ForeignKey("repositories.id"), index=True)
+    source_type = Column(String, index=True)
+    source_id = Column(Integer, index=True)
+    target_type = Column(String, index=True)
+    target_id = Column(Integer, index=True)
+    edge_type = Column(String, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    repository = relationship("Repository")
