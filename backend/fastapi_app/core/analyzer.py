@@ -112,9 +112,6 @@ def run_analysis(repo_id: int, db: Session):
                 if f_model:
                     f_model.language = lang
                     f_model.size = size
-
-                    db.query(models.Symbol).filter_by(file_id=f_model.id).delete(synchronize_session=False)
-                    db.query(models.Dependency).filter_by(source_file_id=f_model.id).delete(synchronize_session=False)
                 else:
                     f_model = models.File(
                         repository_id=repo_id,
@@ -127,7 +124,42 @@ def run_analysis(repo_id: int, db: Session):
                     existing_files[rel_path] = f_model
 
                 if lang in ("python", "javascript", "typescript", "tsx", "jsx"):
-                    analyze_file(file_path, f_model, db, repo_id, lang)
+                    # Wipe dependencies for this file (dependencies table has no external FKs targeting it)
+                    db.query(models.Dependency).filter_by(source_file_id=f_model.id).delete(synchronize_session=False)
+
+                    # Update or add symbols without deleting ones referenced by commit_symbol_changes
+                    existing_syms = {s.name: s for s in db.query(models.Symbol).filter_by(file_id=f_model.id).all()}
+                    try:
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            content = f.read()
+                        new_symbols = extract_symbols(content, lang)
+                        for sym_name, sym_info in new_symbols.items():
+                            if sym_name in existing_syms:
+                                s = existing_syms[sym_name]
+                                s.symbol_type = sym_info["type"]
+                                s.start_line = sym_info["start_line"]
+                                s.end_line = sym_info["end_line"]
+                            else:
+                                sym = models.Symbol(
+                                    file_id=f_model.id,
+                                    name=sym_name,
+                                    symbol_type=sym_info["type"],
+                                    start_line=sym_info["start_line"],
+                                    end_line=sym_info["end_line"]
+                                )
+                                db.add(sym)
+
+                        deps = extract_dependencies(content, lang)
+                        for dep_info in deps:
+                            dep = models.Dependency(
+                                repository_id=repo_id,
+                                source_file_id=f_model.id,
+                                dependency_type=dep_info["type"],
+                                target_name=dep_info["target"]
+                            )
+                            db.add(dep)
+                    except Exception:
+                        pass
 
         # Extract git history
         from backend.fastapi_app.services.git_history_service import extract_git_history
