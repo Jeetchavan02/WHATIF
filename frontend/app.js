@@ -407,25 +407,77 @@ function initGraphCanvas(files, graphData) {
     }
 
     const shockwaves = [];
+    let draggedNode = null;
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
 
-    // Click handler on canvas
-    canvas.onclick = (e) => {
+    // Mouse Interaction Handlers for Dragging & Shockwaves
+    canvas.onmousedown = (e) => {
         const rect = canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
         const curW = rect.width || canvas.clientWidth || 600;
         const curH = rect.height || canvas.clientHeight || 380;
-        const clickedIdx = graphNodes.findIndex(n => Math.hypot(n.x * curW - mx, n.y * curH - my) < 22);
+        const clickedIdx = graphNodes.findIndex(n => Math.hypot(n.x * curW - mx, n.y * curH - my) < 24);
+        
         if (clickedIdx >= 0) {
-            const picked = graphNodes[clickedIdx];
-            selectedFileNode = files.find(f => f.id === picked.id) || { id: picked.id, path: picked.path };
-            selectedSourceFile = picked.path;
-            activeHighlights.source = picked.path;
-            shockwaves.push({ x: picked.x, y: picked.y, r: 0 });
-            picked.pulse = 1;
+            draggedNode = graphNodes[clickedIdx];
+            isDragging = true;
+            dragStartX = mx;
+            dragStartY = my;
+            draggedNode.vx = 0;
+            draggedNode.vy = 0;
+            canvas.style.cursor = "grabbing";
+        }
+    };
+
+    window.addEventListener("mousemove", (e) => {
+        if (!isDragging || !draggedNode) {
+            // Hover cursor indication
+            const rect = canvas.getBoundingClientRect();
+            if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+                const mx = e.clientX - rect.left;
+                const my = e.clientY - rect.top;
+                const curW = rect.width || canvas.clientWidth || 600;
+                const curH = rect.height || canvas.clientHeight || 380;
+                const hovered = graphNodes.some(n => Math.hypot(n.x * curW - mx, n.y * curH - my) < 22);
+                canvas.style.cursor = hovered ? "grab" : "crosshair";
+            }
+            return;
+        }
+
+        const rect = canvas.getBoundingClientRect();
+        const curW = rect.width || canvas.clientWidth || 600;
+        const curH = rect.height || canvas.clientHeight || 380;
+        const mx = Math.max(20, Math.min(curW - 20, e.clientX - rect.left));
+        const my = Math.max(20, Math.min(curH - 20, e.clientY - rect.top));
+
+        draggedNode.x = mx / curW;
+        draggedNode.y = my / curH;
+        draggedNode.vx = 0;
+        draggedNode.vy = 0;
+    });
+
+    window.addEventListener("mouseup", (e) => {
+        if (!isDragging || !draggedNode) return;
+        
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const distMoved = Math.hypot(mx - dragStartX, my - dragStartY);
+
+        // If it was a quick click rather than a substantial drag, trigger select & shockwave
+        if (distMoved < 6) {
+            selectedFileNode = files.find(f => f.id === draggedNode.id) || { id: draggedNode.id, path: draggedNode.path };
+            selectedSourceFile = draggedNode.path;
+            activeHighlights.source = draggedNode.path;
+            shockwaves.push({ x: draggedNode.x, y: draggedNode.y, r: 0 });
+            draggedNode.pulse = 1;
+
             // Highlight matching chip
             document.querySelectorAll("#fileChipsContainer button").forEach(b => {
-                if (b.title === picked.path) {
+                if (b.title === draggedNode.path) {
                     b.style.borderColor = "var(--neon-gold)";
                     b.style.color = "var(--neon-gold)";
                 } else {
@@ -434,7 +486,11 @@ function initGraphCanvas(files, graphData) {
                 }
             });
         }
-    };
+
+        draggedNode = null;
+        isDragging = false;
+        canvas.style.cursor = "crosshair";
+    });
 
     window.triggerGraphShockwave = (filePath) => {
         const idx = graphNodes.findIndex(n => n.path === filePath);
@@ -479,6 +535,7 @@ function initGraphCanvas(files, graphData) {
             b.vx -= dx * f; b.vy -= dy * f;
         }
         for (const n of graphNodes) {
+            if (n === draggedNode) continue;
             n.vx *= 0.85; n.vy *= 0.85;
             n.x += n.vx; n.y += n.vy;
             n.x = Math.max(0.06, Math.min(0.94, n.x));
