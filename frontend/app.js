@@ -53,6 +53,10 @@ document.addEventListener("DOMContentLoaded", () => {
             introVideo.currentTime = 0;
             introVideo.play();
         });
+    // Auto-restore previous analysis results if stored in session/localStorage
+    const lastRepoId = localStorage.getItem("whatif_last_repo_id");
+    if (lastRepoId) {
+        showResults(parseInt(lastRepoId));
     }
 });
 
@@ -121,6 +125,7 @@ async function showResults(repoId) {
     const resultsContainer = document.getElementById("results");
     resultsContainer.style.display = "flex";
     window.currentRepoId = repoId;
+    localStorage.setItem("whatif_last_repo_id", repoId);
     
     try {
         const filesRes = await fetch(`${API_BASE}/repositories/${repoId}/files`);
@@ -132,7 +137,7 @@ async function showResults(repoId) {
         document.getElementById("depCount").innerText = deps.length || 0;
 
         // Load Multiverse Graph & chips
-        loadMultiverseGraph(repoId);
+        await loadMultiverseGraph(repoId);
     } catch (e) {
         console.error("Failed to fetch graph counters:", e);
     }
