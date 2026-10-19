@@ -328,6 +328,9 @@ async function loadMultiverseGraph(repoId) {
                     });
                     btn.style.borderColor = "var(--neon-gold)";
                     btn.style.color = "var(--neon-gold)";
+                    // Auto-populate Oracle file path
+                    const oInput = document.getElementById("oracleFilePath");
+                    if (oInput) oInput.value = f.path;
                     triggerGraphShockwave(f.path);
                 };
                 chipContainer.appendChild(btn);
@@ -740,8 +743,168 @@ async function executeRemoveTimeline() {
     document.getElementById("totalAdditions").innerText = "+0";
     document.getElementById("totalDeletions").innerText = "-0";
     document.getElementById("commitsList").innerHTML = "";
+    document.getElementById("oracleOutput").style.display = "none";
+    document.getElementById("oracleLoading").style.display = "none";
+    document.getElementById("oracleFilePath").value = "";
     document.getElementById("fileChipsContainer").innerHTML = `<span style="font-size: 0.8rem; color: var(--text-muted);">Awaiting repository analysis...</span>`;
     document.getElementById("impactStreams").style.display = "none";
+    const chipSearch = document.getElementById("chipSearchInput");
+    if (chipSearch) chipSearch.value = "";
 
     statusDiv.innerText = "✦ Timeline erased. Enter a new repository URL to begin observation.";
+}
+
+// ========================================================
+// BLAST RADIUS SEARCH FILTER
+// ========================================================
+function filterFileChips(query) {
+    const q = query.toLowerCase();
+    document.querySelectorAll("#fileChipsContainer button").forEach(btn => {
+        const name = (btn.title || btn.innerText).toLowerCase();
+        btn.style.display = !q || name.includes(q) ? "" : "none";
+    });
+}
+
+// ========================================================
+// WHAT IF ORACLE
+// ========================================================
+const RISK_CONFIG = {
+    NONE:     { color: "#94a3b8", bg: "rgba(148,163,184,0.08)", border: "rgba(148,163,184,0.2)",  icon: "◦" },
+    LOW:      { color: "#4ade80", bg: "rgba(74,222,128,0.07)",  border: "rgba(74,222,128,0.3)",   icon: "✓" },
+    MEDIUM:   { color: "#facc15", bg: "rgba(250,204,21,0.07)",  border: "rgba(250,204,21,0.3)",   icon: "⚠" },
+    HIGH:     { color: "#fb923c", bg: "rgba(251,146,60,0.07)",  border: "rgba(251,146,60,0.3)",   icon: "⚡" },
+    CRITICAL: { color: "#f87171", bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.4)",  icon: "☠" },
+};
+
+async function runOracle() {
+    if (!window.currentRepoId) {
+        alert("Analyse a repository first.");
+        return;
+    }
+    const filePath   = document.getElementById("oracleFilePath").value.trim();
+    const changeType = document.getElementById("oracleChangeType").value;
+    if (!filePath) {
+        document.getElementById("oracleFilePath").focus();
+        return;
+    }
+
+    document.getElementById("oracleOutput").style.display  = "none";
+    document.getElementById("oracleLoading").style.display = "block";
+
+    try {
+        const res = await fetch(`${API_BASE}/repositories/${window.currentRepoId}/oracle`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ file_path: filePath, change_type: changeType, max_depth: 4 }),
+        });
+        const data = await res.json();
+        document.getElementById("oracleLoading").style.display = "none";
+        if (data.error) {
+            document.getElementById("oracleOutput").style.display = "block";
+            document.getElementById("oracleRiskBanner").innerHTML =
+                `<span style="color:#f87171; font-family:'JetBrains Mono',monospace; font-size:0.85rem;">⚠ ${data.error}</span><p style="color:var(--text-muted); font-size:0.78rem; margin-top:0.3rem;">${data.tip||""}</p>`;
+            document.getElementById("oracleStatCards").innerHTML = "";
+            document.getElementById("oracleBlastFiles").innerHTML = "";
+            document.getElementById("oracleReviewers").innerHTML = "";
+            document.getElementById("oracleSnippet").textContent = "";
+            return;
+        }
+        renderOracle(data);
+    } catch (e) {
+        document.getElementById("oracleLoading").style.display = "none";
+        document.getElementById("oracleRiskBanner").innerHTML =
+            `<span style="color:#f87171;">Network error: ${e.message}</span>`;
+        document.getElementById("oracleOutput").style.display = "block";
+    }
+}
+
+function renderOracle(d) {
+    const ra  = d.risk_assessment || {};
+    const risk = ra.risk_level || "NONE";
+    const cfg  = RISK_CONFIG[risk] || RISK_CONFIG.NONE;
+    const score = ra.impact_score ?? 0;
+
+    // ── Risk banner ──────────────────────────────────────────────────────
+    document.getElementById("oracleRiskBanner").style.background = cfg.bg;
+    document.getElementById("oracleRiskBanner").style.border = `1px solid ${cfg.border}`;
+    document.getElementById("oracleRiskBanner").innerHTML = `
+        <div style="font-size: 2rem;">${cfg.icon}</div>
+        <div style="flex: 1;">
+            <div style="font-family:'Orbitron',sans-serif; font-size:1rem; color:${cfg.color}; letter-spacing:0.1em;">${risk} RISK</div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.2rem;">${d.summary || ""}</div>
+        </div>
+        <div style="text-align:right;">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:2rem; color:${cfg.color}; font-weight:700;">${score}</div>
+            <div style="font-size:0.7rem; color:var(--text-muted);">/ 100</div>
+        </div>
+    `;
+
+    // ── Stat cards ───────────────────────────────────────────────────────
+    const stats = [
+        { label: "BLAST RADIUS",       val: ra.blast_radius_count ?? 0,       unit: "files" },
+        { label: "COMMIT FREQUENCY",   val: ra.source_commit_frequency ?? 0,  unit: "commits" },
+        { label: "CHANGE MULTIPLIER",  val: `×${ra.change_multiplier ?? 1}`,  unit: "" },
+        { label: "SCENARIO ID",        val: d.scenario_id || "—",             unit: "", mono: true },
+    ];
+    document.getElementById("oracleStatCards").innerHTML = stats.map(s => `
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:0.75rem;">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:0.65rem; color:var(--text-muted); letter-spacing:0.06em; margin-bottom:0.3rem;">${s.label}</div>
+            <div style="font-size:${s.mono ? '0.75rem' : '1.4rem'}; font-weight:700; color:var(--text-main); font-family:${s.mono ? "'JetBrains Mono',monospace" : 'inherit'};">${s.val}</div>
+            ${s.unit ? `<div style="font-size:0.7rem; color:var(--text-muted);">${s.unit}</div>` : ""}
+        </div>
+    `).join("");
+
+    // ── Blast radius files ───────────────────────────────────────────────
+    const blastEl = document.getElementById("oracleBlastFiles");
+    if (!d.blast_radius || d.blast_radius.length === 0) {
+        blastEl.innerHTML = `<span style="font-size:0.78rem;color:var(--text-muted);">No propagation detected.</span>`;
+    } else {
+        blastEl.innerHTML = d.blast_radius.slice(0, 30).map(f => `
+            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.25rem 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+                <span style="font-size:0.65rem;color:var(--neon-cyan);font-family:'JetBrains Mono',monospace;min-width:1.4rem;">D${f.depth}</span>
+                <span style="font-size:0.75rem;color:#cbd5e1;font-family:'JetBrains Mono',monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${f.path}">${f.path.split("/").pop()}</span>
+                <span style="font-size:0.65rem;color:var(--text-muted);margin-left:auto;">${f.language}</span>
+            </div>
+        `).join("");
+    }
+
+    // ── Suggested reviewers ──────────────────────────────────────────────
+    const revEl = document.getElementById("oracleReviewers");
+    if (!d.suggested_reviewers || d.suggested_reviewers.length === 0) {
+        revEl.innerHTML = `<span style="font-size:0.78rem;color:var(--text-muted);">No commit history found for this file.</span>`;
+    } else {
+        revEl.innerHTML = d.suggested_reviewers.map(r => `
+            <div style="display:flex;align-items:center;gap:0.6rem;padding:0.3rem 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+                <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--neon-purple),var(--neon-cyan));display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;color:#fff;flex-shrink:0;">${(r.name||"?")[0].toUpperCase()}</div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:0.78rem;color:var(--text-main);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.name}</div>
+                    <div style="font-size:0.68rem;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.email}</div>
+                </div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:0.72rem;color:var(--neon-gold);flex-shrink:0;">${r.touch_count}×</div>
+            </div>
+        `).join("");
+    }
+
+    // ── CI/CD snippet ────────────────────────────────────────────────────
+    const snippet = {
+        curl: `curl -X POST ${API_BASE}/repositories/${d.repository_id}/oracle \\\n  -H "Content-Type: application/json" \\\n  -d '{"file_path": "${d.target_file}", "change_type": "${d.change_type}"}'`,
+        response_preview: {
+            scenario_id:  d.scenario_id,
+            risk_level:   risk,
+            impact_score: score,
+            blast_radius_count: ra.blast_radius_count,
+        },
+    };
+    document.getElementById("oracleSnippet").textContent = JSON.stringify(snippet, null, 2);
+
+    document.getElementById("oracleOutput").style.display = "block";
+}
+
+function copyOracleSnippet() {
+    const text = document.getElementById("oracleSnippet").textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = event.target;
+        btn.textContent = "copied ✓";
+        setTimeout(() => { btn.textContent = "copy"; }, 2000);
+    });
 }

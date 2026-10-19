@@ -100,6 +100,39 @@ def update_repository_url(repository_id: int, payload: dict, db: Session = Depen
     db.refresh(repo)
     return repo
 
+@router.post("/repositories/{repository_id}/oracle")
+def whatif_oracle(
+    repository_id: int,
+    payload: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    WHAT IF Oracle — CI/CD Risk Intelligence API.
+
+    POST body: { "file_path": "src/auth/login.py", "change_type": "modify|delete|rename|add_dependency", "max_depth": 4 }
+    Returns a structured risk report: scenario_id, risk_level, impact_score (0-100),
+    blast_radius files, suggested_reviewers from commit history.
+
+    Designed for use in GitHub Actions, PR bots, or any CI pipeline.
+    """
+    from backend.fastapi_app.services.oracle_service import run_oracle
+
+    repo = db.query(models.Repository).filter(models.Repository.id == repository_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    file_path   = payload.get("file_path", "").strip()
+    change_type = payload.get("change_type", "modify").strip()
+    max_depth   = int(payload.get("max_depth", 4))
+
+    if not file_path:
+        raise HTTPException(status_code=400, detail="file_path is required")
+    if change_type not in ("modify", "delete", "rename", "add_dependency"):
+        raise HTTPException(status_code=400, detail="change_type must be one of: modify, delete, rename, add_dependency")
+
+    result = run_oracle(repository_id, file_path, change_type, db, max_depth=max_depth)
+    return result
+
 @router.get("/repositories/{repository_id}/files", response_model=List[schemas.FileResponse])
 def get_repository_files(repository_id: int, db: Session = Depends(get_db)):
     return db.query(models.File).filter(models.File.repository_id == repository_id).all()
