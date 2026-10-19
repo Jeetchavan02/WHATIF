@@ -7,7 +7,7 @@ from backend.fastapi_app.core.database import engine
 # Normally we'd use Alembic, but for quick testing we can create all tables here if they don't exist
 models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="WHATIF - Software Change Impact Analyzer")
+app = FastAPI(title="WHAT IF...? - Software Change Impact Analyzer")
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,4 +21,4 @@ app.include_router(router, prefix="/api")
 
 @app.get("/")
 def root():
-    return {"message": "Welcome to WHATIF API"}
+    return {"message": "Welcome to WHAT IF...? API"}
