@@ -29,19 +29,25 @@ document.addEventListener("DOMContentLoaded", () => {
     // Skip / Enter multiverse transition
     function dismissIntro() {
         introModal.classList.add("hidden");
-        setTimeout(() => {
+        introModal.style.pointerEvents = "none";
+        try {
             introVideo.pause();
-        }, 1200);
+        } catch (e) {}
     }
 
-    skipBtn.addEventListener("click", dismissIntro);
+    if (skipBtn) {
+        skipBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            dismissIntro();
+        });
+    }
 
     // Auto dismiss when video ends
     introVideo.addEventListener("ended", dismissIntro);
 
     // ESC key closes intro
     window.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && !introModal.classList.contains("hidden")) {
+        if (e.key === "Escape") {
             dismissIntro();
         }
     });
@@ -53,6 +59,8 @@ document.addEventListener("DOMContentLoaded", () => {
             introVideo.currentTime = 0;
             introVideo.play();
         });
+    }
+
     // Auto-restore previous analysis results if stored in session/localStorage
     const lastRepoId = localStorage.getItem("whatif_last_repo_id");
     if (lastRepoId) {
