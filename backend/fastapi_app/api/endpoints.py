@@ -45,6 +45,61 @@ def get_repository(repository_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Repository not found")
     return repo
 
+@router.delete("/repositories/{repository_id}")
+def delete_repository(repository_id: int, db: Session = Depends(get_db)):
+    """Remove a repository and ALL its associated timeline data (commits, files, symbols, graph edges, analysis runs)."""
+    repo = db.query(models.Repository).filter(models.Repository.id == repository_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    # Delete in dependency order to avoid FK violations
+    # 1. CommitSymbolChanges → CommitFileChanges → Commits
+    commit_ids = [c.id for c in db.query(models.Commit.id).filter(models.Commit.repository_id == repository_id).all()]
+    if commit_ids:
+        file_change_ids = [
+            fc.id for fc in db.query(models.CommitFileChange.id)
+            .filter(models.CommitFileChange.commit_id.in_(commit_ids)).all()
+        ]
+        if file_change_ids:
+            db.query(models.CommitSymbolChange).filter(
+                models.CommitSymbolChange.commit_file_change_id.in_(file_change_ids)
+            ).delete(synchronize_session=False)
+        db.query(models.CommitFileChange).filter(
+            models.CommitFileChange.commit_id.in_(commit_ids)
+        ).delete(synchronize_session=False)
+    db.query(models.Commit).filter(models.Commit.repository_id == repository_id).delete(synchronize_session=False)
+
+    # 2. Symbols (referenced by CommitSymbolChange, already cleared above)
+    file_ids = [f.id for f in db.query(models.File.id).filter(models.File.repository_id == repository_id).all()]
+    if file_ids:
+        db.query(models.Symbol).filter(models.Symbol.file_id.in_(file_ids)).delete(synchronize_session=False)
+
+    # 3. Files, Dependencies, GraphEdges, AnalysisRuns
+    db.query(models.File).filter(models.File.repository_id == repository_id).delete(synchronize_session=False)
+    db.query(models.Dependency).filter(models.Dependency.repository_id == repository_id).delete(synchronize_session=False)
+    db.query(models.GraphEdge).filter(models.GraphEdge.repository_id == repository_id).delete(synchronize_session=False)
+    db.query(models.AnalysisRun).filter(models.AnalysisRun.repository_id == repository_id).delete(synchronize_session=False)
+
+    # 4. Finally the repo itself
+    db.delete(repo)
+    db.commit()
+    return {"message": f"Repository {repository_id} and all its timeline data deleted successfully."}
+
+@router.patch("/repositories/{repository_id}/url")
+def update_repository_url(repository_id: int, payload: dict, db: Session = Depends(get_db)):
+    """Update a repository's URL without triggering re-analysis."""
+    repo = db.query(models.Repository).filter(models.Repository.id == repository_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    new_url = payload.get("url", "").strip()
+    if not new_url:
+        raise HTTPException(status_code=400, detail="URL cannot be empty")
+    repo.url = new_url
+    repo.name = new_url.split('/').pop() or repo.name
+    db.commit()
+    db.refresh(repo)
+    return repo
+
 @router.get("/repositories/{repository_id}/files", response_model=List[schemas.FileResponse])
 def get_repository_files(repository_id: int, db: Session = Depends(get_db)):
     return db.query(models.File).filter(models.File.repository_id == repository_id).all()

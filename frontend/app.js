@@ -134,6 +134,10 @@ async function showResults(repoId) {
     resultsContainer.style.display = "flex";
     window.currentRepoId = repoId;
     localStorage.setItem("whatif_last_repo_id", repoId);
+
+    // Show the remove timeline button
+    const removeBtn = document.getElementById("removeTimelineBtn");
+    if (removeBtn) removeBtn.style.display = "flex";
     
     try {
         const filesRes = await fetch(`${API_BASE}/repositories/${repoId}/files`);
@@ -679,3 +683,52 @@ async function simulateImpact() {
     }
 }
 
+// ========================================================
+// REMOVE TIMELINE
+// ========================================================
+async function confirmRemoveTimeline() {
+    if (!window.currentRepoId) return;
+    const modal = document.getElementById("removeTimelineModal");
+    try {
+        const res = await fetch(`${API_BASE}/repositories/${window.currentRepoId}`);
+        const repo = await res.json();
+        document.getElementById("removeRepoName").textContent = repo.name || `Repo #${window.currentRepoId}`;
+    } catch (e) {
+        document.getElementById("removeRepoName").textContent = `Repo #${window.currentRepoId}`;
+    }
+    modal.style.display = "flex";
+}
+
+async function executeRemoveTimeline() {
+    const modal = document.getElementById("removeTimelineModal");
+    modal.style.display = "none";
+
+    const statusDiv = document.getElementById("statusTelemetry");
+    statusDiv.innerText = "✦ Collapsing timeline...";
+
+    try {
+        await fetch(`${API_BASE}/repositories/${window.currentRepoId}`, { method: "DELETE" });
+    } catch (e) {
+        statusDiv.innerText = "❌ Failed to erase timeline: " + e.message;
+        return;
+    }
+
+    // Clear local state
+    localStorage.removeItem("whatif_last_repo_id");
+    window.currentRepoId = null;
+
+    // Reset UI to fresh state
+    document.getElementById("results").style.display = "none";
+    document.getElementById("repoPath").value = "";
+    document.getElementById("removeTimelineBtn").style.display = "none";
+    document.getElementById("fileCount").innerText = "0";
+    document.getElementById("depCount").innerText = "0";
+    document.getElementById("totalCommits").innerText = "0";
+    document.getElementById("totalAdditions").innerText = "+0";
+    document.getElementById("totalDeletions").innerText = "-0";
+    document.getElementById("commitsList").innerHTML = "";
+    document.getElementById("fileChipsContainer").innerHTML = `<span style="font-size: 0.8rem; color: var(--text-muted);">Awaiting repository analysis...</span>`;
+    document.getElementById("impactStreams").style.display = "none";
+
+    statusDiv.innerText = "✦ Timeline erased. Enter a new repository URL to begin observation.";
+}
