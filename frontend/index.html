@@ -161,17 +161,41 @@
 
                 <!-- INTERACTIVE MULTIVERSE GRAPH CANVAS -->
                 <div class="timeline-deck" style="position: relative; display: flex; flex-direction: column;">
-                    <div class="section-head" style="margin-bottom: 0.5rem;">
-                        <h2>Multiverse Graph</h2>
-                        <div style="display: flex; gap: 1rem; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
+                    <div class="section-head" style="margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.75rem;">
+                        <div style="display: flex; align-items: center; gap: 1rem;">
+                            <h2>Multiverse Graph</h2>
+                            <!-- VIEW TABS -->
+                            <div class="graph-tabs" style="display: inline-flex; background: rgba(0,0,0,0.4); border: 1px solid rgba(0,240,255,0.25); border-radius: 6px; padding: 2px;">
+                                <button id="tab-orbital" class="graph-tab-btn active" onclick="switchGraphMode('orbital')">Orbital Force</button>
+                                <button id="tab-concentric" class="graph-tab-btn" onclick="switchGraphMode('concentric')">Concentric Rims</button>
+                                <button id="tab-grid" class="graph-tab-btn" onclick="switchGraphMode('grid')">Matrix Grid</button>
+                            </div>
+                        </div>
+
+                        <!-- ZOOM / PAN CONTROLS -->
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <button class="graph-ctrl-btn" onclick="zoomGraph(1.2)" title="Zoom In">+</button>
+                            <button class="graph-ctrl-btn" onclick="zoomGraph(0.8)" title="Zoom Out">−</button>
+                            <button class="graph-ctrl-btn" onclick="resetGraphView()" title="Fit / Reset View">⟲ Reset</button>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; flex-wrap: wrap; gap: 0.5rem;">
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0;">
+                            Drag nodes to reposition · Scroll or pinch to zoom · Drag background to pan.
+                        </p>
+                        <div style="display: flex; gap: 0.9rem; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;">
                             <span style="display: flex; align-items: center; gap: 0.3rem;"><i style="width: 8px; height: 8px; border-radius: 50%; background: var(--neon-gold); display: inline-block;"></i> Source</span>
                             <span style="display: flex; align-items: center; gap: 0.3rem;"><i style="width: 8px; height: 8px; border-radius: 50%; background: var(--neon-cyan); display: inline-block;"></i> Structural</span>
                             <span style="display: flex; align-items: center; gap: 0.3rem;"><i style="width: 8px; height: 8px; border-radius: 50%; background: var(--neon-purple); display: inline-block;"></i> Historical</span>
                             <span style="display: flex; align-items: center; gap: 0.3rem;"><i style="width: 8px; height: 8px; border-radius: 50%; background: #ffffff; display: inline-block;"></i> Singularity</span>
                         </div>
                     </div>
-                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">Interactive force-directed causal conduits. Click any node to send a reality shockwave.</p>
-                    <canvas id="multiverseCanvas" style="width: 100%; height: 380px; background: rgba(2, 6, 18, 0.75); border-radius: 8px; border: 1px solid rgba(0, 240, 255, 0.2); cursor: crosshair;"></canvas>
+
+                    <div style="position: relative; width: 100%; border-radius: 8px; overflow: hidden; border: 1px solid rgba(0, 240, 255, 0.2);">
+                        <canvas id="multiverseCanvas" style="width: 100%; height: 420px; background: radial-gradient(circle at center, rgba(10, 25, 45, 0.9) 0%, rgba(2, 6, 18, 0.95) 100%); display: block; cursor: grab;"></canvas>
+                        <div id="graphTooltip" style="position: absolute; pointer-events: none; display: none; background: rgba(5,7,19,0.92); border: 1px solid var(--neon-cyan); color: #fff; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; padding: 0.35rem 0.65rem; border-radius: 4px; box-shadow: 0 0 15px rgba(0,240,255,0.3); z-index: 10; white-space: nowrap;"></div>
+                    </div>
                 </div>
             </section>
 
@@ -327,6 +351,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=5"></script>
+    <script src="app.js?v=6"></script>
 </body>
 </html>

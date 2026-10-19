@@ -147,6 +147,30 @@ def run_oracle(
         for r in reviewer_rows
     ]
 
+    # If the specific file or blast radius has no historical commit matches, fall back to top repository contributors
+    if not suggested_reviewers:
+        top_contribs = (
+            db.query(
+                models.Commit.author_name,
+                models.Commit.author_email,
+                func.count(models.Commit.id).label("touch_count"),
+            )
+            .filter(models.Commit.repository_id == repo_id)
+            .group_by(models.Commit.author_name, models.Commit.author_email)
+            .order_by(func.count(models.Commit.id).desc())
+            .limit(3)
+            .all()
+        )
+        suggested_reviewers = [
+            {
+                "name":        r.author_name,
+                "email":       r.author_email,
+                "touch_count": r.touch_count,
+                "is_fallback": True,
+            }
+            for r in top_contribs
+        ]
+
     # ── 5. Historical commit frequency for source file ────────────────────
     source_commit_count = (
         db.query(func.count(models.CommitFileChange.id))

@@ -344,37 +344,105 @@ async function loadMultiverseGraph(repoId) {
     }
 }
 
+let currentGraphMode = 'orbital';
+let graphScale = 1.0;
+let graphPanX = 0;
+let graphPanY = 0;
+let rawGraphFiles = [];
+let rawGraphData = null;
+
+function switchGraphMode(mode) {
+    currentGraphMode = mode;
+    ['orbital', 'concentric', 'grid'].forEach(m => {
+        const btn = document.getElementById(`tab-${m}`);
+        if (btn) {
+            if (m === mode) btn.classList.add('active');
+            else btn.classList.remove('active');
+        }
+    });
+
+    if (!graphNodes || !graphNodes.length) return;
+    const n = graphNodes.length;
+
+    if (mode === 'orbital') {
+        graphNodes.forEach((node, i) => {
+            const angle = (i / n) * Math.PI * 2;
+            const r = 0.28 + (i % 3) * 0.05;
+            node.targetX = Math.cos(angle) * r + 0.5;
+            node.targetY = Math.sin(angle) * (r * 0.85) + 0.5;
+        });
+    } else if (mode === 'concentric') {
+        const rings = [0.18, 0.32, 0.44];
+        graphNodes.forEach((node, i) => {
+            const ringIdx = i % 3;
+            const ringR = rings[ringIdx];
+            const angle = (Math.floor(i / 3) / Math.ceil(n / 3)) * Math.PI * 2;
+            node.targetX = Math.cos(angle) * ringR + 0.5;
+            node.targetY = Math.sin(angle) * (ringR * 0.85) + 0.5;
+        });
+    } else if (mode === 'grid') {
+        const cols = Math.ceil(Math.sqrt(n * 1.5));
+        const rows = Math.ceil(n / cols);
+        graphNodes.forEach((node, i) => {
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+            node.targetX = 0.12 + (col / Math.max(1, cols - 1)) * 0.76;
+            node.targetY = 0.15 + (row / Math.max(1, rows - 1)) * 0.70;
+        });
+    }
+}
+
+function zoomGraph(factor) {
+    const canvas = document.getElementById("multiverseCanvas");
+    if (!canvas) return;
+    const newScale = Math.max(0.4, Math.min(3.5, graphScale * factor));
+    graphScale = newScale;
+}
+
+function resetGraphView() {
+    graphScale = 1.0;
+    graphPanX = 0;
+    graphPanY = 0;
+}
+
 function initGraphCanvas(files, graphData) {
     const canvas = document.getElementById("multiverseCanvas");
     if (!canvas) return;
+    const tooltip = document.getElementById("graphTooltip");
     const ctx = canvas.getContext("2d");
     const dpr = window.devicePixelRatio || 1;
+
+    rawGraphFiles = files || [];
+    rawGraphData = graphData;
 
     function resizeCanvas() {
         const rect = canvas.getBoundingClientRect();
         const w = rect.width || canvas.clientWidth || 600;
-        const h = rect.height || canvas.clientHeight || 380;
-        canvas.width = w * dpr;
-        canvas.height = h * dpr;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const h = rect.height || canvas.clientHeight || 420;
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
         return { w, h };
     }
 
     let { w, h } = resizeCanvas();
 
-    // Map files into nodes (limit to at most 40 prominently if many files)
-    const activeFiles = files.slice(0, 40);
+    // Pick up to 50 active files
+    const activeFiles = files.slice(0, 50);
     const nodeCount = activeFiles.length || 1;
 
     graphNodes = activeFiles.map((f, i) => {
         const angle = (i / nodeCount) * Math.PI * 2;
         const radiusDist = 0.28 + (i % 3) * 0.05;
+        const x = Math.cos(angle) * radiusDist + 0.5;
+        const y = Math.sin(angle) * (radiusDist * 0.85) + 0.5;
         return {
             id: f.id,
             path: f.path,
             name: f.path.split('/').pop(),
-            x: Math.cos(angle) * radiusDist + 0.5,
-            y: Math.sin(angle) * (radiusDist * 0.85) + 0.5,
+            x: x,
+            y: y,
+            targetX: null,
+            targetY: null,
             vx: 0,
             vy: 0,
             pulse: 0
@@ -385,7 +453,6 @@ function initGraphCanvas(files, graphData) {
     graphEdges = [];
 
     if (graphData && graphData.edges) {
-        // Collect direct file -> file edges
         graphData.edges.forEach(e => {
             if (e.source.startsWith("file:") && e.target.startsWith("file:")) {
                 const sId = parseInt(e.source.split(":")[1]);
@@ -398,7 +465,7 @@ function initGraphCanvas(files, graphData) {
             }
         });
 
-        // If direct file->file edges are sparse, synthesize co-change or commit-sharing edges
+        // Co-change edges
         const commitToFiles = new Map();
         graphData.edges.forEach(e => {
             if (e.source.startsWith("commit:") && e.target.startsWith("file:")) {
@@ -428,72 +495,159 @@ function initGraphCanvas(files, graphData) {
 
     const shockwaves = [];
     let draggedNode = null;
-    let isDragging = false;
-    let dragStartX = 0;
-    let dragStartY = 0;
+    let isDraggingNode = false;
+    let isPanning = false;
+    let panStartX = 0;
+    let panStartY = 0;
+    let clickStartX = 0;
+    let clickStartY = 0;
 
-    // Mouse Interaction Handlers for Dragging & Shockwaves
-    canvas.onmousedown = (e) => {
+    // Coordinate conversion utilities
+    function screenToWorld(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        const curW = rect.width || canvas.clientWidth || 600;
+        const curH = rect.height || canvas.clientHeight || 420;
+        const screenX = clientX - rect.left;
+        const screenY = clientY - rect.top;
+
+        // Invert: screenX = (worldX * curW - curW/2) * graphScale + curW/2 + graphPanX
+        const unpannedX = screenX - (curW / 2 + graphPanX);
+        const unpannedY = screenY - (curH / 2 + graphPanY);
+        const worldX = (unpannedX / graphScale + curW / 2) / curW;
+        const worldY = (unpannedY / graphScale + curH / 2) / curH;
+        return { worldX, worldY, screenX, screenY, curW, curH };
+    }
+
+    function worldToScreen(wx, wy, curW, curH) {
+        const sx = (wx * curW - curW / 2) * graphScale + curW / 2 + graphPanX;
+        const sy = (wy * curH - curH / 2) * graphScale + curH / 2 + graphPanY;
+        return { sx, sy };
+    }
+
+    // Mouse wheel: zoom toward mouse pointer
+    canvas.onwheel = (e) => {
+        e.preventDefault();
+        const zoomDelta = e.deltaY < 0 ? 1.12 : 0.89;
+        const newScale = Math.max(0.4, Math.min(3.5, graphScale * zoomDelta));
         const rect = canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
         const curW = rect.width || canvas.clientWidth || 600;
-        const curH = rect.height || canvas.clientHeight || 380;
-        const clickedIdx = graphNodes.findIndex(n => Math.hypot(n.x * curW - mx, n.y * curH - my) < 24);
-        
-        if (clickedIdx >= 0) {
-            draggedNode = graphNodes[clickedIdx];
-            isDragging = true;
-            dragStartX = mx;
-            dragStartY = my;
+        const curH = rect.height || canvas.clientHeight || 420;
+
+        // Zoom relative to cursor point
+        graphPanX = mx - (mx - graphPanX) * (newScale / graphScale);
+        graphPanY = my - (my - graphPanY) * (newScale / graphScale);
+        graphScale = newScale;
+    };
+
+    // Pointer down: either drag node or pan canvas
+    canvas.onmousedown = (e) => {
+        const { worldX, worldY, screenX, screenY, curW, curH } = screenToWorld(e.clientX, e.clientY);
+        clickStartX = screenX;
+        clickStartY = screenY;
+
+        // Check node hit (in screen coordinates for consistent 20px hit radius)
+        let hitIdx = -1;
+        for (let i = 0; i < graphNodes.length; i++) {
+            const { sx, sy } = worldToScreen(graphNodes[i].x, graphNodes[i].y, curW, curH);
+            if (Math.hypot(sx - screenX, sy - screenY) < 18) {
+                hitIdx = i;
+                break;
+            }
+        }
+
+        if (hitIdx >= 0) {
+            draggedNode = graphNodes[hitIdx];
+            isDraggingNode = true;
             draggedNode.vx = 0;
             draggedNode.vy = 0;
+            draggedNode.targetX = null;
+            draggedNode.targetY = null;
+            canvas.style.cursor = "grabbing";
+        } else {
+            isPanning = true;
+            panStartX = screenX - graphPanX;
+            panStartY = screenY - graphPanY;
             canvas.style.cursor = "grabbing";
         }
     };
 
     window.addEventListener("mousemove", (e) => {
-        if (!isDragging || !draggedNode) {
-            // Hover cursor indication
-            const rect = canvas.getBoundingClientRect();
-            if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
-                const mx = e.clientX - rect.left;
-                const my = e.clientY - rect.top;
-                const curW = rect.width || canvas.clientWidth || 600;
-                const curH = rect.height || canvas.clientHeight || 380;
-                const hovered = graphNodes.some(n => Math.hypot(n.x * curW - mx, n.y * curH - my) < 22);
-                canvas.style.cursor = hovered ? "grab" : "crosshair";
-            }
+        const rect = canvas.getBoundingClientRect();
+        const isOver = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+        const curW = rect.width || canvas.clientWidth || 600;
+        const curH = rect.height || canvas.clientHeight || 420;
+
+        if (isDraggingNode && draggedNode) {
+            const { worldX, worldY } = screenToWorld(e.clientX, e.clientY);
+            draggedNode.x = Math.max(-0.2, Math.min(1.2, worldX));
+            draggedNode.y = Math.max(-0.2, Math.min(1.2, worldY));
+            draggedNode.vx = 0;
+            draggedNode.vy = 0;
+            if (tooltip) tooltip.style.display = "none";
             return;
         }
 
-        const rect = canvas.getBoundingClientRect();
-        const curW = rect.width || canvas.clientWidth || 600;
-        const curH = rect.height || canvas.clientHeight || 380;
-        const mx = Math.max(20, Math.min(curW - 20, e.clientX - rect.left));
-        const my = Math.max(20, Math.min(curH - 20, e.clientY - rect.top));
+        if (isPanning) {
+            const screenX = e.clientX - rect.left;
+            const screenY = e.clientY - rect.top;
+            graphPanX = screenX - panStartX;
+            graphPanY = screenY - panStartY;
+            if (tooltip) tooltip.style.display = "none";
+            return;
+        }
 
-        draggedNode.x = mx / curW;
-        draggedNode.y = my / curH;
-        draggedNode.vx = 0;
-        draggedNode.vy = 0;
+        // Hover inspection + tooltip
+        if (isOver) {
+            const screenX = e.clientX - rect.left;
+            const screenY = e.clientY - rect.top;
+            let hoveredNode = null;
+
+            for (const n of graphNodes) {
+                const { sx, sy } = worldToScreen(n.x, n.y, curW, curH);
+                if (Math.hypot(sx - screenX, sy - screenY) < 16) {
+                    hoveredNode = n;
+                    break;
+                }
+            }
+
+            if (hoveredNode) {
+                canvas.style.cursor = "grab";
+                if (tooltip) {
+                    tooltip.style.display = "block";
+                    tooltip.style.left = `${screenX + 12}px`;
+                    tooltip.style.top = `${screenY + 12}px`;
+                    tooltip.innerHTML = `<strong>${hoveredNode.name}</strong><br><span style="color: #94a3b8; font-size: 0.65rem;">${hoveredNode.path}</span>`;
+                }
+            } else {
+                canvas.style.cursor = "grab";
+                if (tooltip) tooltip.style.display = "none";
+            }
+        } else {
+            if (tooltip) tooltip.style.display = "none";
+        }
     });
 
     window.addEventListener("mouseup", (e) => {
-        if (!isDragging || !draggedNode) return;
-        
-        const rect = canvas.getBoundingClientRect();
-        const mx = e.clientX - rect.left;
-        const my = e.clientY - rect.top;
-        const distMoved = Math.hypot(mx - dragStartX, my - dragStartY);
+        if (!isDraggingNode && !isPanning) return;
 
-        // If it was a quick click rather than a substantial drag, trigger select & shockwave
-        if (distMoved < 6) {
+        const rect = canvas.getBoundingClientRect();
+        const screenX = e.clientX - rect.left;
+        const screenY = e.clientY - rect.top;
+        const distMoved = Math.hypot(screenX - clickStartX, screenY - clickStartY);
+
+        // Click on node (minimal displacement)
+        if (isDraggingNode && draggedNode && distMoved < 6) {
             selectedFileNode = files.find(f => f.id === draggedNode.id) || { id: draggedNode.id, path: draggedNode.path };
             selectedSourceFile = draggedNode.path;
             activeHighlights.source = draggedNode.path;
             shockwaves.push({ x: draggedNode.x, y: draggedNode.y, r: 0 });
             draggedNode.pulse = 1;
+
+            // Sync with oracle input
+            const oracleInput = document.getElementById("oracleTargetFile");
+            if (oracleInput) oracleInput.value = draggedNode.path;
 
             // Highlight matching chip
             document.querySelectorAll("#fileChipsContainer button").forEach(b => {
@@ -508,8 +662,9 @@ function initGraphCanvas(files, graphData) {
         }
 
         draggedNode = null;
-        isDragging = false;
-        canvas.style.cursor = "crosshair";
+        isDraggingNode = false;
+        isPanning = false;
+        canvas.style.cursor = "grab";
     });
 
     window.triggerGraphShockwave = (filePath) => {
@@ -528,52 +683,91 @@ function initGraphCanvas(files, graphData) {
         t += 0.016;
         const rect = canvas.getBoundingClientRect();
         const curW = rect.width || canvas.clientWidth || 600;
-        const curH = rect.height || canvas.clientHeight || 380;
+        const curH = rect.height || canvas.clientHeight || 420;
 
-        // Force simulation
+        // Target-mode spring interpolation or force physics
         for (const n of graphNodes) {
-            n.vx += (0.5 - n.x) * 0.0006;
-            n.vy += (0.5 - n.y) * 0.0006;
+            if (n === draggedNode) continue;
+
+            if (n.targetX !== null && n.targetY !== null) {
+                // Smooth transition to tab layout
+                n.x += (n.targetX - n.x) * 0.08;
+                n.y += (n.targetY - n.y) * 0.08;
+                n.vx *= 0.5;
+                n.vy *= 0.5;
+            } else {
+                // Orbital center gravity
+                n.vx += (0.5 - n.x) * 0.0007;
+                n.vy += (0.5 - n.y) * 0.0007;
+            }
         }
-        for (let i = 0; i < graphNodes.length; i++) {
-            for (let j = i + 1; j < graphNodes.length; j++) {
+
+        if (currentGraphMode === 'orbital') {
+            // Node-node repulsion
+            for (let i = 0; i < graphNodes.length; i++) {
+                for (let j = i + 1; j < graphNodes.length; j++) {
+                    const a = graphNodes[i], b = graphNodes[j];
+                    const dx = a.x - b.x, dy = a.y - b.y;
+                    const distSq = dx * dx + dy * dy + 0.004;
+                    const f = 0.00014 / distSq;
+                    a.vx += dx * f; a.vy += dy * f;
+                    b.vx -= dx * f; b.vy -= dy * f;
+                }
+            }
+
+            // Edge attraction
+            for (const [i, j] of graphEdges) {
                 const a = graphNodes[i], b = graphNodes[j];
-                const dx = a.x - b.x, dy = a.y - b.y;
-                const distSq = dx * dx + dy * dy + 0.005;
-                const f = 0.00012 / distSq;
+                if (!a || !b) continue;
+                const dx = b.x - a.x, dy = b.y - a.y;
+                const dist = Math.hypot(dx, dy);
+                const f = (dist - 0.25) * 0.0025;
                 a.vx += dx * f; a.vy += dy * f;
                 b.vx -= dx * f; b.vy -= dy * f;
             }
         }
-        for (const [i, j] of graphEdges) {
-            const a = graphNodes[i], b = graphNodes[j];
-            if (!a || !b) continue;
-            const dx = b.x - a.x, dy = b.y - a.y;
-            const dist = Math.hypot(dx, dy);
-            const f = (dist - 0.28) * 0.003;
-            a.vx += dx * f; a.vy += dy * f;
-            b.vx -= dx * f; b.vy -= dy * f;
-        }
+
         for (const n of graphNodes) {
             if (n === draggedNode) continue;
-            n.vx *= 0.85; n.vy *= 0.85;
-            n.x += n.vx; n.y += n.vy;
-            n.x = Math.max(0.06, Math.min(0.94, n.x));
-            n.y = Math.max(0.1, Math.min(0.9, n.y));
-            n.pulse *= 0.95;
+            n.vx *= 0.86;
+            n.vy *= 0.86;
+            n.x += n.vx;
+            n.y += n.vy;
+            n.x = Math.max(0.04, Math.min(0.96, n.x));
+            n.y = Math.max(0.06, Math.min(0.94, n.y));
+            n.pulse *= 0.94;
         }
 
+        // Clear screen with DPR transform
+        ctx.save();
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, curW, curH);
+
+        // Apply World Transform (Pan + Zoom)
+        ctx.translate(curW / 2 + graphPanX, curH / 2 + graphPanY);
+        ctx.scale(graphScale, graphScale);
+        ctx.translate(-curW / 2, -curH / 2);
+
+        // Draw background grid lines in matrix mode
+        if (currentGraphMode === 'concentric') {
+            ctx.strokeStyle = "rgba(0, 240, 255, 0.07)";
+            ctx.lineWidth = 1;
+            [0.18, 0.32, 0.44].forEach(r => {
+                ctx.beginPath();
+                ctx.arc(curW * 0.5, curH * 0.5, curW * r, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+        }
 
         // Render laser conduits (Edges)
         for (const [i, j] of graphEdges) {
             const a = graphNodes[i], b = graphNodes[j];
             if (!a || !b) continue;
             const isSourceConn = activeHighlights.source && (a.path === activeHighlights.source || b.path === activeHighlights.source);
-            ctx.strokeStyle = isSourceConn ? "rgba(0, 240, 255, 0.9)" : "rgba(0, 240, 255, 0.18)";
+            ctx.strokeStyle = isSourceConn ? "rgba(0, 240, 255, 0.9)" : "rgba(0, 240, 255, 0.20)";
             ctx.lineWidth = isSourceConn ? 2.5 : 1;
             ctx.shadowColor = "#00f0ff";
-            ctx.shadowBlur = isSourceConn ? 12 : 0;
+            ctx.shadowBlur = isSourceConn ? 10 : 0;
             ctx.beginPath();
             ctx.moveTo(a.x * curW, a.y * curH);
             ctx.lineTo(b.x * curW, b.y * curH);
@@ -590,12 +784,12 @@ function initGraphCanvas(files, graphData) {
         for (let k = shockwaves.length - 1; k >= 0; k--) {
             const wv = shockwaves[k];
             wv.r += 3.5;
-            ctx.strokeStyle = `rgba(255, 190, 59, ${Math.max(0, 1 - wv.r / 220)})`;
+            ctx.strokeStyle = `rgba(255, 190, 59, ${Math.max(0, 1 - wv.r / 260)})`;
             ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.arc(wv.x * curW, wv.y * curH, wv.r, 0, Math.PI * 2);
             ctx.stroke();
-            if (wv.r > 220) shockwaves.splice(k, 1);
+            if (wv.r > 260) shockwaves.splice(k, 1);
         }
 
         // Render Nodes
@@ -621,14 +815,17 @@ function initGraphCanvas(files, graphData) {
             ctx.lineWidth = 2;
             ctx.stroke();
 
-            // Label
+            // Clean, legible text label (truncated if long)
             ctx.shadowBlur = 0;
             ctx.fillStyle = isSource ? "#ffbe3b" : isOverlap ? "#ffffff" : isHistorical ? "#c084fc" : isStructural ? "#38bdf8" : "#94a3b8";
             ctx.font = isSource ? "bold 11px 'JetBrains Mono', monospace" : "10px 'JetBrains Mono', monospace";
             ctx.textAlign = "center";
-            ctx.fillText(n.name, x, y + radius + 13);
+            
+            const displayName = n.name.length > 20 ? n.name.slice(0, 18) + '…' : n.name;
+            ctx.fillText(displayName, x, y + radius + 13);
         }
 
+        ctx.restore();
         animFrameId = requestAnimationFrame(loop);
     }
     loop();

@@ -10,6 +10,9 @@ def resolve_local_dependency(repo_id: int, source_path: str, target_name: str, d
     if target_name.startswith("node_modules") or "/node_modules/" in target_name:
         return None
 
+    extensions  = ["", ".js", ".jsx", ".ts", ".tsx", ".py"]
+    index_files = ["/index.js", "/index.jsx", "/index.ts", "/index.tsx", "/__init__.py"]
+
     if target_name.startswith("./") or target_name.startswith("../"):
         source_dir = os.path.dirname(source_path)
         resolved_path = os.path.normpath(os.path.join(source_dir, target_name))
@@ -17,21 +20,28 @@ def resolve_local_dependency(repo_id: int, source_path: str, target_name: str, d
             resolved_path = resolved_path[2:]
         elif resolved_path == ".":
             resolved_path = ""
-    else:
-        if "/" in target_name:
-            resolved_path = target_name
-        else:
-            resolved_path = target_name.replace(".", "/")
+        candidate_paths = [resolved_path + ext for ext in extensions] + \
+                          [resolved_path + idx for idx in index_files]
+        return db.query(models.File).filter(
+            models.File.repository_id == repo_id,
+            models.File.path.in_(candidate_paths)
+        ).first()
 
-    extensions  = ["", ".js", ".jsx", ".ts", ".tsx", ".py"]
-    index_files = ["/index.js", "/index.jsx", "/index.ts", "/index.tsx", "/__init__.py"]
-    candidate_paths = [resolved_path + ext for ext in extensions] + \
-                      [resolved_path + idx for idx in index_files]
+    # Dotted or slash path (e.g. fastapi.routing.APIRouter or fastapi.FastAPI)
+    # Try the full path first, then strip rightmost symbol names (e.g. FastAPI -> fastapi)
+    raw_parts = target_name.split("/") if "/" in target_name else target_name.split(".")
+    for pop_idx in range(len(raw_parts), 0, -1):
+        subpath = "/".join(raw_parts[:pop_idx])
+        candidate_paths = [subpath + ext for ext in extensions] + \
+                          [subpath + idx for idx in index_files]
+        match = db.query(models.File).filter(
+            models.File.repository_id == repo_id,
+            models.File.path.in_(candidate_paths)
+        ).first()
+        if match:
+            return match
 
-    return db.query(models.File).filter(
-        models.File.repository_id == repo_id,
-        models.File.path.in_(candidate_paths)
-    ).first()
+    return None
 
 
 def build_repository_graph(repo_id: int, db: Session) -> dict:
