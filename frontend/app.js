@@ -238,6 +238,7 @@ async function fetchDependencies() {
 let graphNodes = [];
 let graphEdges = [];
 let selectedSourceFile = null;
+let selectedFileNode = null;
 let activeHighlights = { source: null, structural: new Set(), historical: new Set(), overlap: new Set() };
 let animFrameId = null;
 
@@ -248,27 +249,47 @@ async function loadMultiverseGraph(repoId) {
             fetch(`${API_BASE}/repositories/${repoId}/graph`)
         ]);
         const files = await filesRes.json();
-        const graphData = await graphRes.json();
+        let graphData = await graphRes.json();
+
+        // If repo graph has 0 edges, trigger a build once
+        if (!graphData.edges || graphData.edges.length === 0) {
+            try {
+                await fetch(`${API_BASE}/repositories/${repoId}/graph/build`, { method: "POST" });
+                const retryRes = await fetch(`${API_BASE}/repositories/${repoId}/graph`);
+                graphData = await retryRes.json();
+            } catch (err) {
+                console.warn("Auto-graph build retry failed:", err);
+            }
+        }
+
+        // Filter files to prioritize meaningful source code files (exclude binaries/images/plist)
+        const priorityExts = [".py", ".js", ".ts", ".tsx", ".jsx", ".swift", ".go", ".rs", ".java", ".c", ".cpp", ".h"];
+        const sourceFiles = files.filter(f => priorityExts.some(ext => f.path.endsWith(ext)));
+        const displayFiles = sourceFiles.length > 0 ? sourceFiles : files;
 
         // Render file chips
         const chipContainer = document.getElementById("fileChipsContainer");
         chipContainer.innerHTML = "";
         
-        if (files && files.length > 0) {
-            selectedSourceFile = files[0].path;
-            files.forEach((f, idx) => {
+        if (displayFiles && displayFiles.length > 0) {
+            selectedFileNode = displayFiles[0];
+            selectedSourceFile = displayFiles[0].path;
+            activeHighlights.source = displayFiles[0].path;
+
+            displayFiles.forEach((f, idx) => {
                 const btn = document.createElement("button");
-                btn.className = `action-btn ${f.path === selectedSourceFile ? "gold" : ""}`;
+                btn.className = `action-btn ${f.id === selectedFileNode.id ? "gold" : ""}`;
                 btn.style.fontFamily = "'JetBrains Mono', monospace";
                 btn.style.fontSize = "0.75rem";
                 btn.style.padding = "0.3rem 0.6rem";
-                if (f.path === selectedSourceFile) {
+                if (f.id === selectedFileNode.id) {
                     btn.style.borderColor = "var(--neon-gold)";
                     btn.style.color = "var(--neon-gold)";
                 }
                 btn.innerText = f.path.split('/').pop();
                 btn.title = f.path;
                 btn.onclick = () => {
+                    selectedFileNode = f;
                     selectedSourceFile = f.path;
                     activeHighlights.source = f.path;
                     document.querySelectorAll("#fileChipsContainer button").forEach(b => {
@@ -283,8 +304,8 @@ async function loadMultiverseGraph(repoId) {
             });
         }
 
-        // Initialize Canvas Graph
-        initGraphCanvas(files, graphData);
+        // Initialize Canvas Graph with full graph data and files
+        initGraphCanvas(displayFiles, graphData);
     } catch (e) {
         console.error("Failed to load multiverse graph:", e);
     }
@@ -296,21 +317,31 @@ function initGraphCanvas(files, graphData) {
     const ctx = canvas.getContext("2d");
     const dpr = window.devicePixelRatio || 1;
 
-    let w = canvas.clientWidth;
-    let h = canvas.clientHeight;
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    function resizeCanvas() {
+        const rect = canvas.getBoundingClientRect();
+        const w = rect.width || canvas.clientWidth || 600;
+        const h = rect.height || canvas.clientHeight || 380;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return { w, h };
+    }
 
-    const nodeCount = files.length || 1;
-    graphNodes = files.map((f, i) => {
+    let { w, h } = resizeCanvas();
+
+    // Map files into nodes (limit to at most 40 prominently if many files)
+    const activeFiles = files.slice(0, 40);
+    const nodeCount = activeFiles.length || 1;
+
+    graphNodes = activeFiles.map((f, i) => {
         const angle = (i / nodeCount) * Math.PI * 2;
+        const radiusDist = 0.28 + (i % 3) * 0.05;
         return {
             id: f.id,
             path: f.path,
             name: f.path.split('/').pop(),
-            x: Math.cos(angle) * 0.35 + 0.5,
-            y: Math.sin(angle) * 0.38 + 0.5,
+            x: Math.cos(angle) * radiusDist + 0.5,
+            y: Math.sin(angle) * (radiusDist * 0.85) + 0.5,
             vx: 0,
             vy: 0,
             pulse: 0
@@ -319,7 +350,9 @@ function initGraphCanvas(files, graphData) {
 
     const fileIdToIndex = new Map(graphNodes.map((n, idx) => [n.id, idx]));
     graphEdges = [];
+
     if (graphData && graphData.edges) {
+        // Collect direct file -> file edges
         graphData.edges.forEach(e => {
             if (e.source.startsWith("file:") && e.target.startsWith("file:")) {
                 const sId = parseInt(e.source.split(":")[1]);
@@ -331,6 +364,33 @@ function initGraphCanvas(files, graphData) {
                 }
             }
         });
+
+        // If direct file->file edges are sparse, synthesize co-change or commit-sharing edges
+        const commitToFiles = new Map();
+        graphData.edges.forEach(e => {
+            if (e.source.startsWith("commit:") && e.target.startsWith("file:")) {
+                const cId = e.source;
+                const fId = parseInt(e.target.split(":")[1]);
+                if (fileIdToIndex.has(fId)) {
+                    if (!commitToFiles.has(cId)) commitToFiles.set(cId, []);
+                    commitToFiles.get(cId).push(fileIdToIndex.get(fId));
+                }
+            }
+        });
+
+        const seenPairs = new Set(graphEdges.map(([a, b]) => `${Math.min(a, b)}-${Math.max(a, b)}`));
+        for (const fileIndices of commitToFiles.values()) {
+            for (let i = 0; i < fileIndices.length; i++) {
+                for (let j = i + 1; j < fileIndices.length; j++) {
+                    const idxA = fileIndices[i], idxB = fileIndices[j];
+                    const key = `${Math.min(idxA, idxB)}-${Math.max(idxA, idxB)}`;
+                    if (!seenPairs.has(key)) {
+                        seenPairs.add(key);
+                        graphEdges.push([idxA, idxB]);
+                    }
+                }
+            }
+        }
     }
 
     const shockwaves = [];
@@ -340,9 +400,12 @@ function initGraphCanvas(files, graphData) {
         const rect = canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
-        const clickedIdx = graphNodes.findIndex(n => Math.hypot(n.x * w - mx, n.y * h - my) < 20);
+        const curW = rect.width || canvas.clientWidth || 600;
+        const curH = rect.height || canvas.clientHeight || 380;
+        const clickedIdx = graphNodes.findIndex(n => Math.hypot(n.x * curW - mx, n.y * curH - my) < 22);
         if (clickedIdx >= 0) {
             const picked = graphNodes[clickedIdx];
+            selectedFileNode = files.find(f => f.id === picked.id) || { id: picked.id, path: picked.path };
             selectedSourceFile = picked.path;
             activeHighlights.source = picked.path;
             shockwaves.push({ x: picked.x, y: picked.y, r: 0 });
@@ -374,26 +437,28 @@ function initGraphCanvas(files, graphData) {
 
     function loop() {
         t += 0.016;
-        w = canvas.clientWidth;
-        h = canvas.clientHeight;
+        const rect = canvas.getBoundingClientRect();
+        const curW = rect.width || canvas.clientWidth || 600;
+        const curH = rect.height || canvas.clientHeight || 380;
 
         // Force simulation
         for (const n of graphNodes) {
-            n.vx += (0.5 - n.x) * 0.0003;
-            n.vy += (0.5 - n.y) * 0.0003;
+            n.vx += (0.5 - n.x) * 0.0004;
+            n.vy += (0.5 - n.y) * 0.0004;
         }
         for (let i = 0; i < graphNodes.length; i++) {
             for (let j = i + 1; j < graphNodes.length; j++) {
                 const a = graphNodes[i], b = graphNodes[j];
                 const dx = a.x - b.x, dy = a.y - b.y;
-                const distSq = dx * dx + dy * dy + 0.002;
-                const f = 0.00003 / distSq;
+                const distSq = dx * dx + dy * dy + 0.003;
+                const f = 0.00004 / distSq;
                 a.vx += dx * f; a.vy += dy * f;
                 b.vx -= dx * f; b.vy -= dy * f;
             }
         }
         for (const [i, j] of graphEdges) {
             const a = graphNodes[i], b = graphNodes[j];
+            if (!a || !b) continue;
             const dx = b.x - a.x, dy = b.y - a.y;
             const dist = Math.hypot(dx, dy);
             const f = (dist - 0.22) * 0.002;
@@ -401,32 +466,33 @@ function initGraphCanvas(files, graphData) {
             b.vx -= dx * f; b.vy -= dy * f;
         }
         for (const n of graphNodes) {
-            n.vx *= 0.9; n.vy *= 0.9;
+            n.vx *= 0.88; n.vy *= 0.88;
             n.x += n.vx; n.y += n.vy;
             n.x = Math.max(0.08, Math.min(0.92, n.x));
-            n.y = Math.max(0.1, Math.min(0.9, n.y));
-            n.pulse *= 0.96;
+            n.y = Math.max(0.12, Math.min(0.88, n.y));
+            n.pulse *= 0.95;
         }
 
-        ctx.clearRect(0, 0, w, h);
+        ctx.clearRect(0, 0, curW, curH);
 
         // Render laser conduits (Edges)
         for (const [i, j] of graphEdges) {
             const a = graphNodes[i], b = graphNodes[j];
+            if (!a || !b) continue;
             const isSourceConn = activeHighlights.source && (a.path === activeHighlights.source || b.path === activeHighlights.source);
-            ctx.strokeStyle = isSourceConn ? "rgba(0, 240, 255, 0.85)" : "rgba(0, 240, 255, 0.15)";
+            ctx.strokeStyle = isSourceConn ? "rgba(0, 240, 255, 0.85)" : "rgba(0, 240, 255, 0.2)";
             ctx.lineWidth = isSourceConn ? 2 : 1;
             ctx.shadowColor = "#00f0ff";
             ctx.shadowBlur = isSourceConn ? 10 : 0;
             ctx.beginPath();
-            ctx.moveTo(a.x * w, a.y * h);
-            ctx.lineTo(b.x * w, b.y * h);
+            ctx.moveTo(a.x * curW, a.y * curH);
+            ctx.lineTo(b.x * curW, b.y * curH);
             ctx.stroke();
 
             // Photon particle flow
             const photonP = (t * 0.35 + i * 0.12) % 1;
             ctx.fillStyle = "rgba(220, 255, 255, 0.75)";
-            ctx.fillRect(a.x * w + (b.x - a.x) * w * photonP - 1, a.y * h + (b.y - a.y) * h * photonP - 1, 2, 2);
+            ctx.fillRect(a.x * curW + (b.x - a.x) * curW * photonP - 1, a.y * curH + (b.y - a.y) * curH * photonP - 1, 2, 2);
         }
 
         // Render Shockwaves
@@ -437,7 +503,7 @@ function initGraphCanvas(files, graphData) {
             ctx.strokeStyle = `rgba(255, 190, 59, ${Math.max(0, 1 - wv.r / 220)})`;
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.arc(wv.x * w, wv.y * h, wv.r, 0, Math.PI * 2);
+            ctx.arc(wv.x * curW, wv.y * curH, wv.r, 0, Math.PI * 2);
             ctx.stroke();
             if (wv.r > 220) shockwaves.splice(k, 1);
         }
@@ -450,8 +516,8 @@ function initGraphCanvas(files, graphData) {
             const isStructural = activeHighlights.structural.has(n.path);
 
             const col = isSource ? "#ffbe3b" : isOverlap ? "#ffffff" : isHistorical ? "#a855f7" : isStructural ? "#00f0ff" : "#64748b";
-            const x = n.x * w, y = n.y * h;
-            const radius = 8 + n.pulse * 10 + (isSource ? 4 : 0);
+            const x = n.x * curW, y = n.y * curH;
+            const radius = 7 + n.pulse * 10 + (isSource ? 4 : 0);
 
             ctx.shadowColor = col;
             ctx.shadowBlur = 12 + n.pulse * 20;
@@ -460,10 +526,15 @@ function initGraphCanvas(files, graphData) {
             ctx.arc(x, y, radius, 0, Math.PI * 2);
             ctx.fill();
 
+            // Cel-shaded border outline
+            ctx.strokeStyle = "#050713";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
             // Label
             ctx.shadowBlur = 0;
-            ctx.fillStyle = isSource ? "#ffbe3b" : "#cbd5e1";
-            ctx.font = "10px 'JetBrains Mono', monospace";
+            ctx.fillStyle = isSource ? "#ffbe3b" : isOverlap ? "#ffffff" : isHistorical ? "#c084fc" : isStructural ? "#38bdf8" : "#cbd5e1";
+            ctx.font = isSource ? "bold 11px 'JetBrains Mono', monospace" : "10px 'JetBrains Mono', monospace";
             ctx.textAlign = "center";
             ctx.fillText(n.name, x, y + radius + 13);
         }
@@ -474,21 +545,21 @@ function initGraphCanvas(files, graphData) {
 }
 
 async function simulateImpact() {
-    if (!selectedSourceFile || !window.currentRepoId) return;
+    if (!selectedFileNode || !window.currentRepoId) return;
     const depth = parseInt(document.getElementById("depthSlider").value) || 3;
     const streamsDiv = document.getElementById("impactStreams");
     streamsDiv.style.display = "flex";
     streamsDiv.innerHTML = "<span style='font-family: JetBrains Mono; font-size: 0.8rem; color: var(--neon-gold);'>Simulating reality collapse...</span>";
 
-    triggerGraphShockwave(selectedSourceFile);
+    triggerGraphShockwave(selectedFileNode.path);
 
     try {
         const res = await fetch(`${API_BASE}/repositories/${window.currentRepoId}/whatif`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                source_type: "file",
-                source_id: selectedSourceFile,
+                node_type: "file",
+                node_id: selectedFileNode.id,
                 max_depth: depth
             })
         });
@@ -505,31 +576,32 @@ async function simulateImpact() {
         const overlapItems = [];
 
         affected.forEach(c => {
-            const path = c.identifier;
-            if (c.evidence_types.includes("structural") && c.evidence_types.includes("historical")) {
+            const path = c.path || `file:${c.node_id}`;
+            const cls = c.classification;
+            if (cls === "BOTH") {
                 activeHighlights.overlap.add(path);
-                overlapItems.push(path);
-            } else if (c.evidence_types.includes("structural")) {
+                overlapItems.push(path.split('/').pop());
+            } else if (cls === "STRUCTURAL_ONLY") {
                 activeHighlights.structural.add(path);
-                structuralItems.push(path);
-            } else if (c.evidence_types.includes("historical")) {
+                structuralItems.push(path.split('/').pop());
+            } else if (cls === "HISTORICAL_ONLY") {
                 activeHighlights.historical.add(path);
-                historicalItems.push(path);
+                historicalItems.push(path.split('/').pop());
             }
         });
 
         streamsDiv.innerHTML = `
-            <div style="border-left: 3px solid var(--neon-cyan); padding: 0.4rem 0.8rem; background: rgba(0,240,255,0.06);">
+            <div style="border-left: 3px solid var(--neon-cyan); padding: 0.5rem 0.8rem; background: rgba(0,240,255,0.06); border-radius: 4px;">
                 <b style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--neon-cyan);">🔷 STRUCTURAL INEVITABILITY (${structuralItems.length})</b>
-                <p style="font-size: 0.75rem; color: #cbd5e1; margin-top: 0.2rem;">${structuralItems.join(', ') || 'None'}</p>
+                <p style="font-size: 0.75rem; color: #cbd5e1; margin-top: 0.2rem; word-break: break-all;">${structuralItems.join(', ') || 'None'}</p>
             </div>
-            <div style="border-left: 3px solid var(--neon-purple); padding: 0.4rem 0.8rem; background: rgba(168,85,247,0.06);">
+            <div style="border-left: 3px solid var(--neon-purple); padding: 0.5rem 0.8rem; background: rgba(168,85,247,0.06); border-radius: 4px;">
                 <b style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--neon-purple);">🟣 HISTORICAL RESONANCE (${historicalItems.length})</b>
-                <p style="font-size: 0.75rem; color: #cbd5e1; margin-top: 0.2rem;">${historicalItems.join(', ') || 'None'}</p>
+                <p style="font-size: 0.75rem; color: #cbd5e1; margin-top: 0.2rem; word-break: break-all;">${historicalItems.join(', ') || 'None'}</p>
             </div>
-            <div style="border-left: 3px solid var(--neon-gold); padding: 0.4rem 0.8rem; background: rgba(255,190,59,0.06);">
+            <div style="border-left: 3px solid var(--neon-gold); padding: 0.5rem 0.8rem; background: rgba(255,190,59,0.06); border-radius: 4px;">
                 <b style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--neon-gold);">🌟 THE SINGULARITY (${overlapItems.length})</b>
-                <p style="font-size: 0.75rem; color: #cbd5e1; margin-top: 0.2rem;">${overlapItems.join(', ') || 'None'}</p>
+                <p style="font-size: 0.75rem; color: #cbd5e1; margin-top: 0.2rem; word-break: break-all;">${overlapItems.join(', ') || 'None'}</p>
             </div>
         `;
     } catch (e) {

@@ -70,8 +70,16 @@ def build_repository_graph(repo_id: int, db: Session) -> dict:
             db.add(new_edge)
             edges_created += 1
 
-    # 1. Symbol -> File (defined_in)
+    # Preload files for this repo into a path -> File mapping to avoid N+1 queries
+    files = db.query(models.File).filter(models.File.repository_id == repo_id).all()
+    file_by_path = {f.path: f for f in files}
+    file_by_id = {f.id: f for f in files}
+
+    # Preload symbols for this repo into a (file_id, name) -> Symbol mapping
     symbols = db.query(models.Symbol).join(models.File).filter(models.File.repository_id == repo_id).all()
+    symbol_by_file_and_name = {(s.file_id, s.name): s for s in symbols}
+
+    # 1. Symbol -> File (defined_in)
     for sym in symbols:
         add_edge("symbol", sym.id, "file", sym.file_id, "defined_in")
 
@@ -80,13 +88,11 @@ def build_repository_graph(repo_id: int, db: Session) -> dict:
     for dep in dependencies:
         target_id = dep.target_file_id
         if not target_id and dep.target_name:
-            # Resolve
-            source_file = db.query(models.File).filter_by(id=dep.source_file_id).first()
+            source_file = file_by_id.get(dep.source_file_id)
             if source_file:
                 resolved_file = resolve_local_dependency(repo_id, source_file.path, dep.target_name, db)
                 if resolved_file:
                     target_id = resolved_file.id
-                    # Update dependency record to cache it
                     dep.target_file_id = target_id
                     
         if target_id:
@@ -94,22 +100,35 @@ def build_repository_graph(repo_id: int, db: Session) -> dict:
 
     # 3. Commit -> File (changed) & Commit -> Symbol (changed)
     commits = db.query(models.Commit).filter(models.Commit.repository_id == repo_id).all()
-    for commit in commits:
-        file_changes = db.query(models.CommitFileChange).filter_by(commit_id=commit.id).all()
+    commit_ids = [c.id for c in commits]
+    
+    if commit_ids:
+        file_changes = db.query(models.CommitFileChange).filter(models.CommitFileChange.commit_id.in_(commit_ids)).all()
+        fc_ids = [fc.id for fc in file_changes]
+        
+        # Group file changes by commit
+        fc_by_commit = {}
         for fc in file_changes:
-            # We need the File node ID. The CommitFileChange only has file_path.
-            file_record = db.query(models.File).filter_by(repository_id=repo_id, path=fc.file_path).first()
-            if file_record:
-                add_edge("commit", commit.id, "file", file_record.id, "changed")
+            fc_by_commit.setdefault(fc.commit_id, []).append(fc)
+            
+        symbol_changes = []
+        if fc_ids:
+            symbol_changes = db.query(models.CommitSymbolChange).filter(models.CommitSymbolChange.commit_file_change_id.in_(fc_ids)).all()
+        sc_by_fc = {}
+        for sc in symbol_changes:
+            sc_by_fc.setdefault(sc.commit_file_change_id, []).append(sc)
 
-            symbol_changes = db.query(models.CommitSymbolChange).filter_by(commit_file_change_id=fc.id).all()
-            for sc in symbol_changes:
-                if sc.symbol_id:
-                    add_edge("commit", commit.id, "symbol", sc.symbol_id, "changed")
-                else:
-                    # Resolve symbol
-                    if file_record:
-                        sym_record = db.query(models.Symbol).filter_by(file_id=file_record.id, name=sc.symbol_name).first()
+        for commit in commits:
+            for fc in fc_by_commit.get(commit.id, []):
+                file_record = file_by_path.get(fc.file_path)
+                if file_record:
+                    add_edge("commit", commit.id, "file", file_record.id, "changed")
+
+                for sc in sc_by_fc.get(fc.id, []):
+                    if sc.symbol_id:
+                        add_edge("commit", commit.id, "symbol", sc.symbol_id, "changed")
+                    elif file_record:
+                        sym_record = symbol_by_file_and_name.get((file_record.id, sc.symbol_name))
                         if sym_record:
                             sc.symbol_id = sym_record.id
                             add_edge("commit", commit.id, "symbol", sym_record.id, "changed")
