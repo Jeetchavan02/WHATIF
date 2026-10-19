@@ -92,16 +92,21 @@ def run_analysis(repo_id: int, db: Session):
             except InvalidGitRepositoryError:
                 raise ValueError(f"Not a valid git repository: {local_path}")
 
+        # Pre-load existing files keyed by path
         existing_files = {f.path: f for f in db.query(models.File).filter_by(repository_id=repo_id).all()}
+
+        FILE_BATCH = 100  # commit DB every N files
+        files_processed = 0
+        new_deps: list[models.Dependency] = []
+        new_syms: list[models.Symbol]     = []
 
         for root, dirs, files in os.walk(local_path):
             dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
 
             for file_name in files:
                 file_path = os.path.join(root, file_name)
-                rel_path = os.path.relpath(file_path, local_path)
-
-                lang = get_language(file_path)
+                rel_path  = os.path.relpath(file_path, local_path)
+                lang      = get_language(file_path)
 
                 try:
                     size = os.path.getsize(file_path)
@@ -110,62 +115,85 @@ def run_analysis(repo_id: int, db: Session):
 
                 f_model = existing_files.get(rel_path)
                 if f_model:
+                    # Skip re-parse if size unchanged (fast-path for re-analysis)
+                    if f_model.size == size and lang not in ("unknown",):
+                        continue
                     f_model.language = lang
-                    f_model.size = size
+                    f_model.size     = size
                 else:
                     f_model = models.File(
                         repository_id=repo_id,
                         path=rel_path,
                         language=lang,
-                        size=size
+                        size=size,
                     )
                     db.add(f_model)
                     db.flush()
                     existing_files[rel_path] = f_model
 
                 if lang in ("python", "javascript", "typescript", "tsx", "jsx"):
-                    # Wipe dependencies for this file (dependencies table has no external FKs targeting it)
-                    db.query(models.Dependency).filter_by(source_file_id=f_model.id).delete(synchronize_session=False)
+                    # Wipe old deps for this file (no FK pointing at Dependency)
+                    db.query(models.Dependency).filter_by(
+                        source_file_id=f_model.id
+                    ).delete(synchronize_session=False)
 
-                    # Update or add symbols without deleting ones referenced by commit_symbol_changes
-                    existing_syms = {s.name: s for s in db.query(models.Symbol).filter_by(file_id=f_model.id).all()}
+                    # Upsert symbols to avoid FK violations with CommitSymbolChange
+                    existing_syms = {
+                        s.name: s
+                        for s in db.query(models.Symbol).filter_by(file_id=f_model.id).all()
+                    }
+
                     try:
-                        with open(file_path, "r", encoding="utf-8") as f:
-                            content = f.read()
-                        new_symbols = extract_symbols(content, lang)
-                        for sym_name, sym_info in new_symbols.items():
+                        with open(file_path, "r", encoding="utf-8") as fh:
+                            content = fh.read()
+
+                        for sym_name, sym_info in extract_symbols(content, lang).items():
                             if sym_name in existing_syms:
                                 s = existing_syms[sym_name]
                                 s.symbol_type = sym_info["type"]
-                                s.start_line = sym_info["start_line"]
-                                s.end_line = sym_info["end_line"]
+                                s.start_line  = sym_info["start_line"]
+                                s.end_line    = sym_info["end_line"]
                             else:
-                                sym = models.Symbol(
+                                new_syms.append(models.Symbol(
                                     file_id=f_model.id,
                                     name=sym_name,
                                     symbol_type=sym_info["type"],
                                     start_line=sym_info["start_line"],
-                                    end_line=sym_info["end_line"]
-                                )
-                                db.add(sym)
+                                    end_line=sym_info["end_line"],
+                                ))
 
-                        deps = extract_dependencies(content, lang)
-                        for dep_info in deps:
-                            dep = models.Dependency(
+                        for dep_info in extract_dependencies(content, lang):
+                            new_deps.append(models.Dependency(
                                 repository_id=repo_id,
                                 source_file_id=f_model.id,
                                 dependency_type=dep_info["type"],
-                                target_name=dep_info["target"]
-                            )
-                            db.add(dep)
+                                target_name=dep_info["target"],
+                            ))
                     except Exception:
                         pass
 
-        # Extract git history
+                files_processed += 1
+                if files_processed % FILE_BATCH == 0:
+                    if new_syms:
+                        db.bulk_save_objects(new_syms)
+                        new_syms = []
+                    if new_deps:
+                        db.bulk_save_objects(new_deps)
+                        new_deps = []
+                    db.commit()
+
+        # Final flush for file walk
+        if new_syms:
+            db.bulk_save_objects(new_syms)
+        if new_deps:
+            db.bulk_save_objects(new_deps)
+        db.commit()
+
+        # Extract git history (capped + batched internally)
         from backend.fastapi_app.services.git_history_service import extract_git_history
         extract_git_history(local_path, repo_id, db)
 
-        # Build repository graph edges
+        # Build repository graph edges (bulk-insert internally)
         from backend.fastapi_app.services.graph_service import build_repository_graph
         build_repository_graph(repo_id, db)
 
@@ -182,4 +210,3 @@ def run_analysis(repo_id: int, db: Session):
         run.error_message = str(e)
         run.completed_at = datetime.utcnow()
         db.commit()
-

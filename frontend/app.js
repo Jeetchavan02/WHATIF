@@ -61,10 +61,23 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // Auto-restore previous analysis results if stored in session/localStorage
+    // Auto-restore previous analysis results — verify repo still exists first
     const lastRepoId = localStorage.getItem("whatif_last_repo_id");
     if (lastRepoId) {
-        showResults(parseInt(lastRepoId));
+        fetch(`${API_BASE}/repositories/${lastRepoId}`)
+            .then(res => {
+                if (!res.ok) throw new Error("gone");
+                return res.json();
+            })
+            .then(repo => {
+                // Restore URL in input and show results
+                document.getElementById("repoPath").value = repo.url || "";
+                showResults(parseInt(lastRepoId));
+            })
+            .catch(() => {
+                // Repo was deleted or backend is unavailable — clear stale state
+                localStorage.removeItem("whatif_last_repo_id");
+            });
     }
 });
 
