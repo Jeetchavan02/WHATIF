@@ -227,7 +227,7 @@ def test_source_file_filtering(mock_whatif, mock_hist, mock_struct):
     
     db.close()
 
-@patch("backend.fastapi_app.services.benchmark_service.run_benchmark")
+@patch("backend.fastapi_app.api.endpoints.run_benchmark")
 def test_api_endpoint(mock_run):
     mock_run.return_value = schemas.BenchmarkResponse(
         repository_id=1,

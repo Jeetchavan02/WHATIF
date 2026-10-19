@@ -30,16 +30,17 @@ def extract_git_history(repo_path: str, repo_id: int, db: Session):
         logger.warning(f"Repository {repo_path} is empty or has no valid branch.")
         return
 
+    # Pre-fetch existing commit hashes to avoid N SQL queries
+    existing_hashes = set(
+        h[0] for h in db.query(models.Commit.commit_hash).filter_by(repository_id=repo_id).all()
+    )
+
     # Iterate through commits
     for commit in git_repo.iter_commits('HEAD'):
         try:
-            # Idempotency check: see if commit already exists
-            existing_commit = db.query(models.Commit).filter_by(
-                repository_id=repo_id, commit_hash=commit.hexsha
-            ).first()
-
-            if existing_commit:
+            if commit.hexsha in existing_hashes:
                 continue # Skip already processed commits
+            existing_hashes.add(commit.hexsha)
 
             # Prepare Commit DB model
             parent_hash = commit.parents[0].hexsha if commit.parents else None

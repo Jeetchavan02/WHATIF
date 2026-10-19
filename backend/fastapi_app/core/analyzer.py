@@ -7,7 +7,7 @@ from git import Repo, InvalidGitRepositoryError
 
 from backend.fastapi_app.models import models
 
-IGNORED_DIRS = {".git", "node_modules", "__pycache__", ".venv", "virtualenv", "build", "dist"}
+IGNORED_DIRS = {".git", "node_modules", "__pycache__", ".venv", "virtualenv", "build", "dist", "assets", ".pytest_cache", ".gemini"}
 
 def get_language(path: str) -> str:
     ext = os.path.splitext(path)[1].lower()
@@ -79,7 +79,7 @@ def run_analysis(repo_id: int, db: Session):
             temp_dir = tempfile.mkdtemp()
             local_path = temp_dir
             try:
-                git_repo = Repo.clone_from(repo.url, local_path)
+                git_repo = Repo.clone_from(repo.url, local_path, env={"GIT_TERMINAL_PROMPT": "0"})
             except Exception as e:
                 shutil.rmtree(temp_dir)
                 raise ValueError(f"Failed to clone repository: {e}")
@@ -91,6 +91,8 @@ def run_analysis(repo_id: int, db: Session):
                 git_repo = Repo(local_path)
             except InvalidGitRepositoryError:
                 raise ValueError(f"Not a valid git repository: {local_path}")
+
+        existing_files = {f.path: f for f in db.query(models.File).filter_by(repository_id=repo_id).all()}
 
         for root, dirs, files in os.walk(local_path):
             dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
@@ -106,16 +108,13 @@ def run_analysis(repo_id: int, db: Session):
                 except OSError:
                     continue
 
-                from sqlalchemy.exc import IntegrityError
-
-                f_model = db.query(models.File).filter_by(repository_id=repo_id, path=rel_path).first()
+                f_model = existing_files.get(rel_path)
                 if f_model:
                     f_model.language = lang
                     f_model.size = size
 
                     db.query(models.Symbol).filter_by(file_id=f_model.id).delete(synchronize_session=False)
                     db.query(models.Dependency).filter_by(source_file_id=f_model.id).delete(synchronize_session=False)
-                    db.flush()
                 else:
                     f_model = models.File(
                         repository_id=repo_id,
@@ -123,23 +122,9 @@ def run_analysis(repo_id: int, db: Session):
                         language=lang,
                         size=size
                     )
-
-                    try:
-                        with db.begin_nested():
-                            db.add(f_model)
-                            db.flush()
-                    except IntegrityError:
-                        # Another process created the file simultaneously.
-                        # The nested transaction is rolled back, but the outer transaction remains active.
-                        f_model = db.query(models.File).filter_by(repository_id=repo_id, path=rel_path).first()
-                        if not f_model:
-                            raise
-
-                        f_model.language = lang
-                        f_model.size = size
-                        db.query(models.Symbol).filter_by(file_id=f_model.id).delete(synchronize_session=False)
-                        db.query(models.Dependency).filter_by(source_file_id=f_model.id).delete(synchronize_session=False)
-                        db.flush()
+                    db.add(f_model)
+                    db.flush()
+                    existing_files[rel_path] = f_model
 
                 if lang in ("python", "javascript", "typescript", "tsx", "jsx"):
                     analyze_file(file_path, f_model, db, repo_id, lang)
@@ -147,6 +132,10 @@ def run_analysis(repo_id: int, db: Session):
         # Extract git history
         from backend.fastapi_app.services.git_history_service import extract_git_history
         extract_git_history(local_path, repo_id, db)
+
+        # Build repository graph edges
+        from backend.fastapi_app.services.graph_service import build_repository_graph
+        build_repository_graph(repo_id, db)
 
         if temp_dir:
             import shutil

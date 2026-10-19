@@ -280,7 +280,20 @@ def get_graph(repository_id: int, db: Session = Depends(get_db)):
             "edge_type": e.edge_type
         })
 
-    nodes_list = [{"id": f"{ntype}:{nid}", "type": ntype, "ref_id": nid} for ntype, nid in nodes_set]
+    file_map = {f.id: f.path for f in db.query(models.File).filter_by(repository_id=repository_id).all()}
+    symbol_map = {s.id: s.name for s in db.query(models.Symbol).join(models.File).filter(models.File.repository_id == repository_id).all()}
+    commit_map = {c.id: c.commit_hash[:7] for c in db.query(models.Commit).filter_by(repository_id=repository_id).all()}
+
+    nodes_list = []
+    for ntype, nid in nodes_set:
+        label = f"{ntype}:{nid}"
+        if ntype == "file":
+            label = file_map.get(nid, label)
+        elif ntype == "symbol":
+            label = symbol_map.get(nid, label)
+        elif ntype == "commit":
+            label = f"#{commit_map.get(nid, str(nid))}"
+        nodes_list.append({"id": f"{ntype}:{nid}", "type": ntype, "ref_id": nid, "label": label})
 
     return {
         "nodes": nodes_list,

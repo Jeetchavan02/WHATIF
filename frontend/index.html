@@ -3,40 +3,166 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WHATIF - Testing UI</title>
+    <title>WHAT IF...? | Software Change Impact Analyzer</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <h1>WHATIF</h1>
-    <p>Software Change Impact Analyzer - Basic Testing UI</p>
 
-    <div class="control-panel">
-        <input type="text" id="repoPath" placeholder="Enter Git repository URL or path" style="width: 300px;">
-        <button onclick="analyzeRepo()">Analyze</button>
+    <!-- ========================================================
+         CINEMATIC INTRO MODAL (TRAILER FOOTAGE & MONOLOGUE)
+         ======================================================== -->
+    <div id="introModal">
+        <div class="intro-video-wrapper">
+            <video id="introVideo" playsinline preload="auto">
+                <source src="assets/videos/whatif_title_intro.mp4" type="video/mp4">
+            </video>
+            
+            <div class="intro-vignette"></div>
+
+            <div class="intro-quote-bar">
+                <p>"Time. Space. Software. It's more than a linear path. It's a prism of endless possibilities, where a single change can branch out into infinite unseen consequences..."</p>
+                <span>— The Watcher // Software Nexus</span>
+            </div>
+
+            <div class="intro-controls">
+                <button id="toggleAudioBtn" class="intro-btn gold">
+                    🔊 Sound On
+                </button>
+                <button id="skipIntroBtn" class="intro-btn">
+                    Enter Multiverse ➔
+                </button>
+            </div>
+        </div>
     </div>
 
-    <div id="status"></div>
-    <div id="results" style="display:none;">
-        <h2>Repository Information</h2>
-        <pre id="repoInfo"></pre>
-
-        <h3>Stats</h3>
-        <ul>
-            <li>Files: <span id="fileCount">0</span></li>
-            <li>Dependencies: <span id="depCount">0</span></li>
-        </ul>
-
-        <h3>GIT HISTORY</h3>
-        <p>Total commits: <span id="totalCommits">0</span></p>
-        <p>Total additions: <span id="totalAdditions">0</span></p>
-        <p>Total deletions: <span id="totalDeletions">0</span></p>
-        <ul id="commitsList"></ul>
-
-        <button onclick="fetchFiles()">Inspect Files</button>
-        <button onclick="fetchDependencies()">Inspect Dependencies</button>
-        
-        <pre id="detailsView"></pre>
+    <!-- ========================================================
+         LIVING AMBIENT COSMIC BACKGROUND (THE WATCHER IN BACKGROUND)
+         ======================================================== -->
+    <div class="ambient-video-container">
+        <video class="ambient-video" autoplay loop muted playsinline>
+            <source src="assets/videos/ambient_cosmic_loop.mp4" type="video/mp4">
+        </video>
+        <div class="ambient-overlay"></div>
+        <div class="scanline-grid"></div>
     </div>
+
+    <!-- ========================================================
+         MAIN COMMAND HUD DECK
+         ======================================================== -->
+    <main class="app-container">
+        <!-- HEADER / BRAND HERO -->
+        <header class="hero-header">
+            <div class="brand-wrapper">
+                <h1>WHAT IF...?</h1>
+                <div class="hero-tagline">Software Change Impact Analyzer // Causal Multiverse</div>
+            </div>
+            
+            <div class="watcher-badge">
+                <div class="watcher-orb"></div>
+                <div class="watcher-badge-text">The Watcher is Observing</div>
+                <button id="replayIntroBtn" class="inspect-btn" style="margin-left: 0.5rem;">Replay Intro</button>
+            </div>
+        </header>
+
+        <!-- NEXUS INGESTION BAR -->
+        <section class="nexus-deck">
+            <div class="deck-title">
+                <span>✦</span> Quantum Nexus // Repository Analysis
+            </div>
+            <div class="input-group">
+                <input type="text" id="repoPath" class="nexus-input" placeholder="Enter Git repository URL or local path (e.g., /Users/... or https://github.com/...)" />
+                <button class="nexus-btn" onclick="analyzeRepo()">
+                    <span>✦</span> Observe Timeline
+                </button>
+            </div>
+            <div id="statusTelemetry">System Idle. Awaiting Repository Nexus.</div>
+        </section>
+
+        <!-- RESULTS MATRIX -->
+        <div id="results" style="display:none; display: flex; flex-direction: column; gap: 2rem;">
+            <!-- TELEMETRY CARDS -->
+            <section class="results-grid">
+                <div class="telemetry-card">
+                    <div class="telemetry-label">Source Components Analyzed</div>
+                    <div class="telemetry-val" id="fileCount">0</div>
+                </div>
+                <div class="telemetry-card">
+                    <div class="telemetry-label">AST Dependencies Mapped</div>
+                    <div class="telemetry-val" id="depCount">0</div>
+                </div>
+                <div class="telemetry-card">
+                    <div class="telemetry-label">Recorded Commit Timelines</div>
+                    <div class="telemetry-val" id="totalCommits">0</div>
+                </div>
+                <div class="telemetry-card">
+                    <div class="telemetry-label">Net Code Additions / Deletions</div>
+                    <div class="telemetry-val" style="font-size: 1.5rem; margin-top: 0.8rem;">
+                        <span id="totalAdditions" style="color: #4ade80;">+0</span> / 
+                        <span id="totalDeletions" style="color: #f87171;">-0</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- MULTIVERSE GRAPH & IMPACT SIMULATOR -->
+            <section class="results-grid" style="grid-template-columns: 1fr 2fr; gap: 1.5rem;">
+                <!-- BLAST RADIUS SIMULATOR -->
+                <div class="timeline-deck" style="display: flex; flex-direction: column; gap: 1rem;">
+                    <div class="section-head" style="margin-bottom: 0.5rem;">
+                        <h2>Blast Radius Simulator</h2>
+                    </div>
+                    <p style="font-size: 0.85rem; color: var(--text-muted);">Choose a source file to observe reality collapse.</p>
+                    
+                    <div id="fileChipsContainer" style="display: flex; flex-wrap: wrap; gap: 0.5rem; max-height: 200px; overflow-y: auto;">
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Awaiting repository analysis...</span>
+                    </div>
+
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 0.5rem;">
+                        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--text-muted);">MAX_DEPTH:</span>
+                        <input type="range" id="depthSlider" min="1" max="5" value="3" style="flex: 1; margin: 0 1rem; accent-color: var(--neon-cyan);" oninput="document.getElementById('depthVal').innerText = this.value">
+                        <b id="depthVal" style="font-family: 'JetBrains Mono', monospace; color: var(--neon-cyan);">3</b>
+                    </div>
+
+                    <button class="nexus-btn" style="width: 100%; justify-content: center; padding: 0.8rem;" onclick="simulateImpact()">
+                        ✦ SIMULATE REALITY COLLAPSE
+                    </button>
+
+                    <div id="impactStreams" style="display: none; flex-direction: column; gap: 0.75rem; margin-top: 0.5rem; max-height: 220px; overflow-y: auto;">
+                        <!-- Streams populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- INTERACTIVE MULTIVERSE GRAPH CANVAS -->
+                <div class="timeline-deck" style="position: relative; display: flex; flex-direction: column;">
+                    <div class="section-head" style="margin-bottom: 0.5rem;">
+                        <h2>Multiverse Graph</h2>
+                        <div style="display: flex; gap: 1rem; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
+                            <span style="display: flex; align-items: center; gap: 0.3rem;"><i style="width: 8px; height: 8px; border-radius: 50%; background: var(--neon-gold); display: inline-block;"></i> Source</span>
+                            <span style="display: flex; align-items: center; gap: 0.3rem;"><i style="width: 8px; height: 8px; border-radius: 50%; background: var(--neon-cyan); display: inline-block;"></i> Structural</span>
+                            <span style="display: flex; align-items: center; gap: 0.3rem;"><i style="width: 8px; height: 8px; border-radius: 50%; background: var(--neon-purple); display: inline-block;"></i> Historical</span>
+                            <span style="display: flex; align-items: center; gap: 0.3rem;"><i style="width: 8px; height: 8px; border-radius: 50%; background: #ffffff; display: inline-block;"></i> Singularity</span>
+                        </div>
+                    </div>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">Interactive force-directed causal conduits. Click any node to send a reality shockwave.</p>
+                    <canvas id="multiverseCanvas" style="width: 100%; height: 380px; background: rgba(2, 6, 18, 0.75); border-radius: 8px; border: 1px solid rgba(0, 240, 255, 0.2); cursor: crosshair;"></canvas>
+                </div>
+            </section>
+
+            <!-- TIMELINE & COMMITS STREAM -->
+            <section class="timeline-deck">
+                <div class="section-head">
+                    <h2>Temporal Commits History</h2>
+                    <div class="action-row" style="margin: 0;">
+                        <button class="action-btn" onclick="fetchFiles()">Inspect File Entities</button>
+                        <button class="action-btn" onclick="fetchDependencies()">Inspect AST Graph Edges</button>
+                    </div>
+                </div>
+
+                <ul id="commitsList" class="commits-stream"></ul>
+
+                <pre id="detailsView" class="terminal-view" style="display: none;"></pre>
+            </section>
+        </div>
+    </main>
 
     <script src="app.js"></script>
 </body>
