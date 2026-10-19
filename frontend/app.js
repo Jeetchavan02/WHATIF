@@ -456,15 +456,15 @@ function initGraphCanvas(files, graphData) {
 
         // Force simulation
         for (const n of graphNodes) {
-            n.vx += (0.5 - n.x) * 0.0004;
-            n.vy += (0.5 - n.y) * 0.0004;
+            n.vx += (0.5 - n.x) * 0.0006;
+            n.vy += (0.5 - n.y) * 0.0006;
         }
         for (let i = 0; i < graphNodes.length; i++) {
             for (let j = i + 1; j < graphNodes.length; j++) {
                 const a = graphNodes[i], b = graphNodes[j];
                 const dx = a.x - b.x, dy = a.y - b.y;
-                const distSq = dx * dx + dy * dy + 0.003;
-                const f = 0.00004 / distSq;
+                const distSq = dx * dx + dy * dy + 0.005;
+                const f = 0.00012 / distSq;
                 a.vx += dx * f; a.vy += dy * f;
                 b.vx -= dx * f; b.vy -= dy * f;
             }
@@ -474,15 +474,15 @@ function initGraphCanvas(files, graphData) {
             if (!a || !b) continue;
             const dx = b.x - a.x, dy = b.y - a.y;
             const dist = Math.hypot(dx, dy);
-            const f = (dist - 0.22) * 0.002;
+            const f = (dist - 0.28) * 0.003;
             a.vx += dx * f; a.vy += dy * f;
             b.vx -= dx * f; b.vy -= dy * f;
         }
         for (const n of graphNodes) {
-            n.vx *= 0.88; n.vy *= 0.88;
+            n.vx *= 0.85; n.vy *= 0.85;
             n.x += n.vx; n.y += n.vy;
-            n.x = Math.max(0.08, Math.min(0.92, n.x));
-            n.y = Math.max(0.12, Math.min(0.88, n.y));
+            n.x = Math.max(0.06, Math.min(0.94, n.x));
+            n.y = Math.max(0.1, Math.min(0.9, n.y));
             n.pulse *= 0.95;
         }
 
@@ -493,10 +493,10 @@ function initGraphCanvas(files, graphData) {
             const a = graphNodes[i], b = graphNodes[j];
             if (!a || !b) continue;
             const isSourceConn = activeHighlights.source && (a.path === activeHighlights.source || b.path === activeHighlights.source);
-            ctx.strokeStyle = isSourceConn ? "rgba(0, 240, 255, 0.85)" : "rgba(0, 240, 255, 0.2)";
-            ctx.lineWidth = isSourceConn ? 2 : 1;
+            ctx.strokeStyle = isSourceConn ? "rgba(0, 240, 255, 0.9)" : "rgba(0, 240, 255, 0.18)";
+            ctx.lineWidth = isSourceConn ? 2.5 : 1;
             ctx.shadowColor = "#00f0ff";
-            ctx.shadowBlur = isSourceConn ? 10 : 0;
+            ctx.shadowBlur = isSourceConn ? 12 : 0;
             ctx.beginPath();
             ctx.moveTo(a.x * curW, a.y * curH);
             ctx.lineTo(b.x * curW, b.y * curH);
@@ -504,8 +504,8 @@ function initGraphCanvas(files, graphData) {
 
             // Photon particle flow
             const photonP = (t * 0.35 + i * 0.12) % 1;
-            ctx.fillStyle = "rgba(220, 255, 255, 0.75)";
-            ctx.fillRect(a.x * curW + (b.x - a.x) * curW * photonP - 1, a.y * curH + (b.y - a.y) * curH * photonP - 1, 2, 2);
+            ctx.fillStyle = isSourceConn ? "rgba(255, 190, 59, 0.95)" : "rgba(220, 255, 255, 0.75)";
+            ctx.fillRect(a.x * curW + (b.x - a.x) * curW * photonP - 1.5, a.y * curH + (b.y - a.y) * curH * photonP - 1.5, 3, 3);
         }
 
         // Render Shockwaves
@@ -546,7 +546,7 @@ function initGraphCanvas(files, graphData) {
 
             // Label
             ctx.shadowBlur = 0;
-            ctx.fillStyle = isSource ? "#ffbe3b" : isOverlap ? "#ffffff" : isHistorical ? "#c084fc" : isStructural ? "#38bdf8" : "#cbd5e1";
+            ctx.fillStyle = isSource ? "#ffbe3b" : isOverlap ? "#ffffff" : isHistorical ? "#c084fc" : isStructural ? "#38bdf8" : "#94a3b8";
             ctx.font = isSource ? "bold 11px 'JetBrains Mono', monospace" : "10px 'JetBrains Mono', monospace";
             ctx.textAlign = "center";
             ctx.fillText(n.name, x, y + radius + 13);
@@ -606,15 +606,15 @@ async function simulateImpact() {
         streamsDiv.innerHTML = `
             <div style="border-left: 3px solid var(--neon-cyan); padding: 0.5rem 0.8rem; background: rgba(0,240,255,0.06); border-radius: 4px;">
                 <b style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--neon-cyan);">🔷 STRUCTURAL INEVITABILITY (${structuralItems.length})</b>
-                <p style="font-size: 0.75rem; color: #cbd5e1; margin-top: 0.2rem; word-break: break-all;">${structuralItems.join(', ') || 'None'}</p>
+                <p style="font-size: 0.75rem; color: #cbd5e1; margin-top: 0.2rem; word-break: break-all;">${structuralItems.length > 0 ? structuralItems.join(', ') : 'None'}</p>
             </div>
             <div style="border-left: 3px solid var(--neon-purple); padding: 0.5rem 0.8rem; background: rgba(168,85,247,0.06); border-radius: 4px;">
                 <b style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--neon-purple);">🟣 HISTORICAL RESONANCE (${historicalItems.length})</b>
-                <p style="font-size: 0.75rem; color: #cbd5e1; margin-top: 0.2rem; word-break: break-all;">${historicalItems.join(', ') || 'None'}</p>
+                <p style="font-size: 0.75rem; color: #cbd5e1; margin-top: 0.2rem; word-break: break-all;">${historicalItems.length > 0 ? historicalItems.join(', ') : 'None'}</p>
             </div>
             <div style="border-left: 3px solid var(--neon-gold); padding: 0.5rem 0.8rem; background: rgba(255,190,59,0.06); border-radius: 4px;">
                 <b style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--neon-gold);">🌟 THE SINGULARITY (${overlapItems.length})</b>
-                <p style="font-size: 0.75rem; color: #cbd5e1; margin-top: 0.2rem; word-break: break-all;">${overlapItems.join(', ') || 'None'}</p>
+                <p style="font-size: 0.75rem; color: #cbd5e1; margin-top: 0.2rem; word-break: break-all;">${overlapItems.length > 0 ? overlapItems.join(', ') : 'None'}</p>
             </div>
         `;
     } catch (e) {
